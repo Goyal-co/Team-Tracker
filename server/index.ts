@@ -34,12 +34,46 @@ function createPool(databaseUrl: string) {
   return new pg.Pool({ connectionString: url.toString(), ssl: { rejectUnauthorized: false } });
 }
 
+function quoteIdent(name: string) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("The database name in DATABASE_URL is not supported.");
+  return `"${name}"`;
+}
+
+async function connectDatabase(databaseUrl: string) {
+  const pool = createPool(databaseUrl);
+  try {
+    await pool.query("SELECT 1");
+    return pool;
+  } catch (error) {
+    await pool.end().catch(() => undefined);
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    const message = error instanceof Error ? error.message : "";
+    if (code !== "3D000" && !/does not exist/i.test(message)) throw error;
+    const url = new URL(databaseUrl);
+    const name = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    if (!name || name === "postgres") throw error;
+    url.pathname = "/postgres";
+    const admin = createPool(url.toString());
+    try {
+      const existing = await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]);
+      if ((existing.rowCount ?? 0) === 0) {
+        await admin.query(`CREATE DATABASE ${quoteIdent(name)}`);
+        console.log(`Created database ${name}.`);
+      }
+    } finally {
+      await admin.end();
+    }
+    const created = createPool(databaseUrl);
+    await created.query("SELECT 1");
+    return created;
+  }
+}
+
 async function main() {
   loadEnvFile();
   const config = loadConfig();
   fs.mkdirSync(config.dataDir, { recursive: true });
-  const pool = createPool(config.databaseUrl);
-  await pool.query("SELECT 1");
+  const pool = await connectDatabase(config.databaseUrl);
   await ensureWorkspaceSchema(pool);
   const redis = config.redisUrl ? new Redis(config.redisUrl, { maxRetriesPerRequest: 2, lazyConnect: true }) : null;
   redis?.on("error", () => undefined);
