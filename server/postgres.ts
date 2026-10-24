@@ -1,5 +1,8 @@
+import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { Redis } from "ioredis";
+import { HttpError } from "./errors";
+import type { SessionStore, TokenStore } from "./redis-store";
 import type {
   ActivityLog,
   Attachment,
@@ -208,7 +211,39 @@ ALTER TABLE workspace.messages ADD COLUMN IF NOT EXISTS mime_type text NOT NULL 
 ALTER TABLE workspace.messages ADD COLUMN IF NOT EXISTS size_bytes integer NOT NULL DEFAULT 0;
 ALTER TABLE workspace.messages ADD COLUMN IF NOT EXISTS storage_ref text NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS messages_recipient_idx ON workspace.messages (recipient_id);
+CREATE TABLE IF NOT EXISTS workspace.sessions (
+  token_hash text PRIMARY KEY,
+  user_id text NOT NULL,
+  expires_at text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON workspace.sessions (user_id);
+CREATE TABLE IF NOT EXISTS workspace.google_tokens (
+  user_id text PRIMARY KEY,
+  refresh_token text NOT NULL,
+  access_token text NOT NULL,
+  expires_at text NOT NULL,
+  scopes text NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS workspace.meta (
+  key text PRIMARY KEY,
+  value text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace.rate_limits (
+  key text PRIMARY KEY,
+  count integer NOT NULL,
+  reset_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace.locks (
+  name text PRIMARY KEY,
+  token text NOT NULL,
+  expires_at timestamptz NOT NULL
+);
 `;
+
+export interface VersionStore {
+  get(): Promise<string>;
+  incr(): Promise<string>;
+}
 
 const VERSION_KEY = "mops:db-version";
 
@@ -221,12 +256,114 @@ export async function workspaceIsEmpty(pool: Pool) {
   return result.rows[0]?.count === "0";
 }
 
-export function createPostgresStore(pool: Pool, redis: Redis): DataStore {
+export function createRedisVersions(redis: Redis): VersionStore {
+  return {
+    async get() {
+      return (await redis.get(VERSION_KEY)) ?? "0";
+    },
+    async incr() {
+      return String(await redis.incr(VERSION_KEY));
+    },
+  };
+}
+
+export function createPgVersions(pool: Pool): VersionStore {
+  return {
+    async get() {
+      const result = await pool.query<{ value: string }>("SELECT value FROM workspace.meta WHERE key = 'db-version'");
+      return result.rows[0]?.value ?? "0";
+    },
+    async incr() {
+      const result = await pool.query<{ value: string }>(`INSERT INTO workspace.meta (key, value) VALUES ('db-version', '1')
+        ON CONFLICT (key) DO UPDATE SET value = (workspace.meta.value::bigint + 1)::text
+        RETURNING value`);
+      return result.rows[0].value;
+    },
+  };
+}
+
+export function createPgSessions(pool: Pool): SessionStore {
+  return {
+    async get(tokenHash) {
+      const result = await pool.query<{ user_id: string; expires_at: string }>("SELECT user_id, expires_at FROM workspace.sessions WHERE token_hash = $1", [tokenHash]);
+      const row = result.rows[0];
+      if (!row || row.expires_at <= new Date().toISOString()) return null;
+      return { tokenHash, userId: row.user_id, expiresAt: row.expires_at };
+    },
+    async put(record) {
+      await pool.query(`INSERT INTO workspace.sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)
+        ON CONFLICT (token_hash) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at`, [record.tokenHash, record.userId, record.expiresAt]);
+    },
+    async delete(tokenHash) {
+      await pool.query("DELETE FROM workspace.sessions WHERE token_hash = $1", [tokenHash]);
+    },
+    async listByUser(userId) {
+      const now = new Date().toISOString();
+      await pool.query("DELETE FROM workspace.sessions WHERE user_id = $1 AND expires_at <= $2", [userId, now]);
+      const result = await pool.query<{ token_hash: string; expires_at: string }>("SELECT token_hash, expires_at FROM workspace.sessions WHERE user_id = $1", [userId]);
+      return result.rows.map((row) => ({ tokenHash: row.token_hash, userId, expiresAt: row.expires_at }));
+    },
+  };
+}
+
+export function createPgTokens(pool: Pool): TokenStore {
+  return {
+    async get(userId) {
+      const result = await pool.query<{ user_id: string; refresh_token: string; access_token: string; expires_at: string; scopes: string }>("SELECT user_id, refresh_token, access_token, expires_at, scopes FROM workspace.google_tokens WHERE user_id = $1", [userId]);
+      const row = result.rows[0];
+      if (!row) return null;
+      return { userId: row.user_id, refreshToken: row.refresh_token, accessToken: row.access_token, expiresAt: row.expires_at, scopes: row.scopes };
+    },
+    async put(record) {
+      await pool.query(`INSERT INTO workspace.google_tokens (user_id, refresh_token, access_token, expires_at, scopes) VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (user_id) DO UPDATE SET refresh_token = EXCLUDED.refresh_token, access_token = EXCLUDED.access_token, expires_at = EXCLUDED.expires_at, scopes = EXCLUDED.scopes`, [record.userId, record.refreshToken, record.accessToken, record.expiresAt, record.scopes ?? ""]);
+    },
+    async delete(userId) {
+      await pool.query("DELETE FROM workspace.google_tokens WHERE user_id = $1", [userId]);
+    },
+  };
+}
+
+export function createPgLock(pool: Pool) {
+  return async function lock<T>(fn: () => Promise<T>): Promise<T> {
+    const token = randomBytes(12).toString("hex");
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const acquired = await pool.query(`INSERT INTO workspace.locks (name, token, expires_at) VALUES ('write', $1, now() + interval '15 seconds')
+        ON CONFLICT (name) DO UPDATE SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at
+        WHERE workspace.locks.expires_at <= now()
+        RETURNING token`, [token]);
+      if (acquired.rows.length > 0) {
+        try {
+          return await fn();
+        } finally {
+          await pool.query("DELETE FROM workspace.locks WHERE name = 'write' AND token = $1", [token]);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new HttpError(503, "The workspace is busy. Try again.");
+  };
+}
+
+export function createPgRateLimit(pool: Pool) {
+  return async (key: string, bucket: "auth" | "api") => {
+    const limit = bucket === "auth" ? 30 : 240;
+    const windowSeconds = bucket === "auth" ? 600 : 60;
+    const result = await pool.query<{ count: number }>(`INSERT INTO workspace.rate_limits (key, count, reset_at) VALUES ($1, 1, now() + ($2 || ' seconds')::interval)
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE WHEN workspace.rate_limits.reset_at <= now() THEN 1 ELSE workspace.rate_limits.count + 1 END,
+        reset_at = CASE WHEN workspace.rate_limits.reset_at <= now() THEN now() + ($2 || ' seconds')::interval ELSE workspace.rate_limits.reset_at END
+      RETURNING count`, [`${bucket}:${key}`, String(windowSeconds)]);
+    return result.rows[0].count <= limit;
+  };
+}
+
+export function createPostgresStore(pool: Pool, versions: VersionStore): DataStore {
   let cache: { version: string; db: BusinessDb } | null = null;
   return {
     kind: "postgres",
     async read() {
-      const version = (await redis.get(VERSION_KEY)) ?? "0";
+      const version = await versions.get();
       if (cache?.version === version) return structuredClone(cache.db);
       const db = await loadWorkspace(pool);
       cache = { version, db: structuredClone(db) };
@@ -234,7 +371,7 @@ export function createPostgresStore(pool: Pool, redis: Redis): DataStore {
     },
     async write(db) {
       await saveWorkspace(pool, db);
-      const version = String(await redis.incr(VERSION_KEY));
+      const version = await versions.incr();
       cache = { version, db: structuredClone(db) };
     },
   };

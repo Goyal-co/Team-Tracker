@@ -30,9 +30,7 @@ export function loadConfig(): AppConfig {
   }
   const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
   const redisUrl = process.env.REDIS_URL?.trim() ?? "";
-  if (!databaseUrl || !redisUrl) {
-    throw new Error("Set DATABASE_URL and REDIS_URL. From Team-Tracker, run: docker compose up -d");
-  }
+  if (!databaseUrl) throw new Error("Set DATABASE_URL.");
   return {
     production,
     sessionSecret,

@@ -6,7 +6,7 @@ import pg from "pg";
 import { loadConfig } from "./config";
 import { createApp } from "./app";
 import { prepareDatabase } from "../src/domain/workspace";
-import { createPostgresStore, ensureWorkspaceSchema, workspaceIsEmpty } from "./postgres";
+import { createPgLock, createPgRateLimit, createPgSessions, createPgTokens, createPgVersions, createPostgresStore, createRedisVersions, ensureWorkspaceSchema, workspaceIsEmpty } from "./postgres";
 import { createRedisLock, createRedisRateLimit, createRedisSessions, createRedisTokens } from "./redis-store";
 import { readJsonFile, type SessionRecord, type TokenRecord } from "./store";
 
@@ -26,16 +26,38 @@ function loadEnvFile() {
   }
 }
 
+function createPool(databaseUrl: string) {
+  const local = /@(localhost|127\.0\.0\.1|postgres)(?::|\/)/.test(databaseUrl);
+  if (local || !/[?&]sslmode=/.test(databaseUrl)) return new pg.Pool({ connectionString: databaseUrl });
+  const url = new URL(databaseUrl);
+  url.searchParams.delete("sslmode");
+  return new pg.Pool({ connectionString: url.toString(), ssl: { rejectUnauthorized: false } });
+}
+
 async function main() {
   loadEnvFile();
   const config = loadConfig();
   fs.mkdirSync(config.dataDir, { recursive: true });
-  const pool = new pg.Pool({ connectionString: config.databaseUrl });
-  const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 2 });
+  const pool = createPool(config.databaseUrl);
   await pool.query("SELECT 1");
-  await redis.ping();
   await ensureWorkspaceSchema(pool);
-  const store = createPostgresStore(pool, redis);
+  const redis = config.redisUrl ? new Redis(config.redisUrl, { maxRetriesPerRequest: 2, lazyConnect: true }) : null;
+  redis?.on("error", () => undefined);
+  let redisReady = false;
+  if (redis) {
+    try {
+      await redis.connect();
+      await redis.ping();
+      redisReady = true;
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      console.error("Redis is not reachable. Sessions will be stored in PostgreSQL. Remove REDIS_URL on Render if you are not using Key Value.");
+      redis.disconnect();
+    }
+  }
+  const sessions = redisReady && redis ? createRedisSessions(redis) : createPgSessions(pool);
+  const tokens = redisReady && redis ? createRedisTokens(redis) : createPgTokens(pool);
+  const store = createPostgresStore(pool, redisReady && redis ? createRedisVersions(redis) : createPgVersions(pool));
   if (await workspaceIsEmpty(pool)) {
     const file = path.join(config.dataDir, "db.json");
     if (fs.existsSync(file)) {
@@ -47,9 +69,7 @@ async function main() {
       await store.write(prepared.db);
     }
   }
-  const sessions = createRedisSessions(redis);
-  const tokens = createRedisTokens(redis);
-  if (!(await redis.get("mops:legacy-imported"))) {
+  if (redisReady && redis && !(await redis.get("mops:legacy-imported"))) {
     for (const record of readJsonFile<SessionRecord[]>(path.join(config.dataDir, "sessions.json"), [])) {
       if (record.expiresAt > new Date().toISOString()) await sessions.put(record);
     }
@@ -64,8 +84,8 @@ async function main() {
     sessions,
     tokens,
     uploadDir: path.join(config.dataDir, "uploads"),
-    lock: createRedisLock(redis),
-    allow: createRedisRateLimit(redis),
+    lock: redisReady && redis ? createRedisLock(redis) : createPgLock(pool),
+    allow: redisReady && redis ? createRedisRateLimit(redis) : createPgRateLimit(pool),
   });
   app.listen(config.port, () => {
     console.log(`Goyal Workspace API on http://localhost:${config.port} (postgres)`);
