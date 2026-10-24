@@ -1,0 +1,59 @@
+name: team-tracker
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: goyal
+      POSTGRES_PASSWORD: goyal
+      POSTGRES_DB: goyal_workspace
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goyal -d goyal_workspace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5175
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-session-secret}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      DATABASE_URL: postgres://goyal:goyal@postgres:5432/goyal_workspace
+      REDIS_URL: redis://redis:6379
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:5175/api/google/calendar/callback}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+    ports:
+      - "5175:5175"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  pgdata:
+  redisdata:
