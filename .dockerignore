@@ -1,6 +1,23 @@
+# syntax=docker/dockerfile:1.7
+
+# Keep the build context small and make sure secrets never reach the image.
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+certs/
 node_modules
 dist
-.git
-.env
+dist-server
 data
+apps-script
+coverage
 *.log
+*.md
+Dockerfile
+docker-compose.yml
+.vscode
+.idea
+.DS_Store
+**/*.test.ts

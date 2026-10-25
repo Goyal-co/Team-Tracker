@@ -1,0 +1,36 @@
+# Team Tracker - application only.
+# PostgreSQL and Redis already run on the EC2 host; the app reaches them at
+# host.docker.internal (mapped to the host gateway below). Configure the URLs
+# in .env. See DEPLOY.md for the full runbook.
+
+name: team-tracker
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: team-tracker:latest
+    container_name: team-tracker
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 5175
+    ports:
+      # Behind nginx you can bind to loopback only: "127.0.0.1:5175:5175"
+      - "5175:5175"
+    extra_hosts:
+      # Lets the container reach Postgres/Redis published on the EC2 host.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Uploads and legacy data files. The image runs as uid 1000, so:
+      #   sudo chown -R 1000:1000 ./data
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
