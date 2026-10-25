@@ -29,6 +29,7 @@ import {
   placeholderAttendees,
   renameSelf,
   respondInvite,
+  respondMeeting,
   revokeInvite,
   saveUser,
   slotsFor,
@@ -514,6 +515,15 @@ export function createApp(deps: AppDeps) {
       if (!token) throw new HttpError(409, "Connect Google Calendar to refresh this meeting.");
       const google = await getCalendarEvent(token, prepared.eventId);
       const meeting = await mutate((db) => ({ db, result: syncMeeting(db, req.user, req.params.id, google) }));
+      res.json({ meeting });
+    }),
+  );
+  app.post(
+    "/api/meetings/:id/respond",
+    authed(async (req, res) => {
+      const response = req.body?.response;
+      if (response !== "accepted" && response !== "declined" && response !== "tentative") throw new HttpError(400, "Choose accept, reject, or postpone.");
+      const meeting = await mutate((db) => ({ db, result: respondMeeting(db, req.user, req.params.id, response) }));
       res.json({ meeting });
     }),
   );

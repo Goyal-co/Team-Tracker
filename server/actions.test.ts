@@ -28,8 +28,11 @@ describe("workspace actions", () => {
     const db = companyFixture(NOW);
     const lee = db.users.find((user) => user.User_ID === "U-002") as User;
     const omar = db.users.find((user) => user.User_ID === "U-005") as User;
-    expect(() => createInvite(db, lee, { Email: "omar@example.com", Team_ID: "TM-002", Access_Role: "Employee", Member_Role: "Member" })).toThrow(/already has an account/i);
+    const pending = createInvite(db, lee, { Email: "omar@example.com", Team_ID: "TM-002", Access_Role: "Employee", Member_Role: "Member" });
+    expect(pending.Status).toBe("Pending");
+    expect(db.notifications.some((item) => item.Type === "invited" && item.Recipient_ID === "U-005")).toBe(true);
     expect(() => createTask(db, omar, taskInput())).toThrow(/invite/i);
+    expect(() => createInvite(db, lee, { Email: "omar@example.com", Team_ID: "TM-002", Access_Role: "Employee", Member_Role: "Member" })).toThrow(/pending invite/i);
     addTeamMember(db, lee, "TM-002", omar.User_ID, "Member");
     expect(db.members.some((member) => member.User_ID === "U-005" && member.Team_ID === "TM-002" && member.Status === "Active")).toBe(true);
     expect(createInvite(db, lee, { Email: "new.person@example.com", Team_ID: "TM-002", Access_Role: "Employee", Member_Role: "Member" }).Status).toBe("Pending");

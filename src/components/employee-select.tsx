@@ -22,6 +22,7 @@ export function EmployeeSelect({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const selected = users.find((user) => user.User_ID === value);
@@ -32,7 +33,9 @@ export function EmployeeSelect({
 
   useEffect(() => {
     const onPointer = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || listRef.current?.contains(target)) return;
+      setOpen(false);
     };
     window.addEventListener("mousedown", onPointer);
     return () => window.removeEventListener("mousedown", onPointer);
@@ -78,6 +81,7 @@ export function EmployeeSelect({
       />
       {open && box && createPortal(
         <ul
+          ref={listRef}
           id={listId}
           role="listbox"
           className="fixed z-50 max-h-64 overflow-auto rounded-xl border border-line bg-white p-1 shadow-lg"

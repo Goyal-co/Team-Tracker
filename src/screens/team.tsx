@@ -137,15 +137,10 @@ export function TeamPage() {
               {canInvite && (
                 <form className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-4" onSubmit={(event) => {
                   event.preventDefault();
-                  const known = data.users.some((user) => user.Email.toLowerCase() === email.trim().toLowerCase());
-                  if (known) {
-                    toast("That person already has an account. Add them from the list above.", "error");
-                    return;
-                  }
-                  void run(async () => { await invitePerson({ Email: email, Team_ID: teamId, Access_Role: "Employee", Member_Role: "Member" }); setEmail(""); }, "Invitation sent. They join this group when they accept.");
+                  void run(async () => { await invitePerson({ Email: email, Team_ID: teamId, Access_Role: "Employee", Member_Role: "Member" }); setEmail(""); }, "Invitation sent. They accept it to join this group.");
                 }}>
                   <div className="min-w-[220px] flex-1">
-                    <Field label="Invite a new person by email" hint="Only for someone who does not have an account yet.">
+                    <Field label="Invite by email" hint="They see the request after signing in with this email, including if they already signed in.">
                       <TextInput type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" required />
                     </Field>
                   </div>

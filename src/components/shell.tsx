@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from "react-router-dom";
 import { Bell, CalendarDays, CircleHelp, Download, History, LayoutDashboard, ListChecks, LogOut, Menu, MessageSquare, Plus, Search, Settings, Users, X } from "lucide-react";
 import { formatLongDate } from "../domain/dates";
@@ -21,7 +21,7 @@ const NAV = [
 ];
 
 export function Shell() {
-  const { data, signOut, markRead } = useWorkspace();
+  const { data, signOut, markRead, respondInvite } = useWorkspace();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,10 +34,13 @@ export function Shell() {
   const [meetingId, setMeetingId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(new URLSearchParams(location.search).get("task"));
   const [quick, setQuick] = useState(false);
+  const quickRef = useRef<HTMLDivElement>(null);
+  const notesRef = useRef<HTMLDivElement>(null);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPrompt | null>(null);
   const [installHelp, setInstallHelp] = useState(false);
   const [standalone, setStandalone] = useState(false);
   const unread = data.notifications.filter((item) => !item.Read_At).length;
+  const myInvites = data.invites.filter((invite) => invite.Status === "Pending" && invite.Email.toLowerCase() === data.me.Email.toLowerCase());
 
   useEffect(() => {
     setStandalone(window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true);
@@ -65,6 +68,17 @@ export function Shell() {
   }, [location.pathname, location.search]);
 
   useEffect(() => {
+    if (!quick && !notesOpen) return;
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (quick && !quickRef.current?.contains(target)) setQuick(false);
+      if (notesOpen && !notesRef.current?.contains(target)) setNotesOpen(false);
+    };
+    window.addEventListener("mousedown", onPointer);
+    return () => window.removeEventListener("mousedown", onPointer);
+  }, [notesOpen, quick]);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -85,11 +99,11 @@ export function Shell() {
     };
   }, [data.meetings, data.tasks, data.users, query]);
 
-  const railItem = "flex w-full flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-center text-[10px] leading-3";
+  const railItem = "flex w-full flex-col items-center gap-1 rounded-lg px-1.5 py-2 text-center text-[11px] leading-3";
 
   return (
     <div className="flex h-full min-h-screen bg-canvas">
-      <aside className={cn("fixed inset-y-0 left-0 z-30 flex w-[72px] flex-col border-r border-line bg-white md:static", mobile ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
+      <aside className={cn("fixed inset-y-0 left-0 z-30 flex w-[108px] flex-col border-r border-line bg-white md:static", mobile ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
         <div className="flex h-14 items-center justify-center">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-white">G</span>
         </div>
@@ -119,7 +133,7 @@ export function Shell() {
       </aside>
       {mobile && <button className="fixed inset-0 z-20 bg-slate-900/30 md:hidden" aria-label="Close menu" onClick={() => setMobile(false)} />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-end gap-2 border-b border-line bg-white px-3 md:px-5">
+        <header className="flex h-14 items-center justify-end gap-3 border-b border-line bg-white px-3 md:gap-4 md:px-5">
           <button type="button" className="mr-auto rounded-lg p-2 text-muted hover:bg-slate-50 md:hidden" aria-label="Open menu" onClick={() => setMobile(true)}><Menu size={18} /></button>
           <button type="button" className="rounded-lg p-2 text-muted hover:bg-slate-50 md:hidden" aria-label="Search" onClick={() => setSearchOpen(true)}><Search size={18} /></button>
           <button type="button" className="hidden h-9 w-80 shrink-0 items-center gap-2 rounded-[10px] border border-line bg-canvas px-3 text-left text-[13px] text-muted md:flex" onClick={() => setSearchOpen(true)}>
@@ -128,8 +142,8 @@ export function Shell() {
             <span className="ml-auto hidden text-[11px] lg:inline">Ctrl K</span>
           </button>
           <span className="hidden text-[13px] text-muted lg:inline">{formatLongDate()}</span>
-          <div className="relative">
-            <Button type="button" className="px-2 sm:px-3" onClick={() => setQuick((value) => !value)}><Plus size={15} /><span className="hidden sm:inline">Quick create</span></Button>
+          <div className="relative" ref={quickRef}>
+            <Button type="button" className="px-2 sm:px-3" onClick={() => { setNotesOpen(false); setQuick((value) => !value); }}><Plus size={15} /><span className="hidden sm:inline">Quick create</span></Button>
             {quick && (
               <div className="absolute right-0 z-20 mt-1 w-48 rounded-xl border border-line bg-white p-1 shadow-lg">
                 {canCreateTasks(data.me) && <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-slate-50" onClick={() => { setQuick(false); setCreateTask(""); }}>Create work</button>}
@@ -137,8 +151,8 @@ export function Shell() {
               </div>
             )}
           </div>
-          <div className="relative">
-            <button type="button" className="relative rounded-lg p-2 text-muted hover:bg-slate-50" aria-label="Notifications" onClick={() => setNotesOpen((value) => !value)}>
+          <div className="relative" ref={notesRef}>
+            <button type="button" className="relative rounded-lg p-2 text-muted hover:bg-slate-50" aria-label="Notifications" onClick={() => { setQuick(false); setNotesOpen((value) => !value); }}>
               <Bell size={18} />
               {unread > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white">{unread > 9 ? "9+" : unread}</span>}
             </button>
@@ -173,8 +187,23 @@ export function Shell() {
               </div>
             )}
           </div>
-          <button type="button" aria-label="Your profile" onClick={() => navigate(`/team/${data.me.User_ID}`)}><Avatar name={data.me.Name} size={32} /></button>
+          <button type="button" aria-label="Your profile" className="ml-1" onClick={() => navigate(`/team/${data.me.User_ID}`)}><Avatar name={data.me.Name} size={32} /></button>
         </header>
+        {myInvites.length > 0 && (
+          <div className="border-b border-line bg-accent-soft px-3 py-2 md:px-5">
+            {myInvites.map((invite) => {
+              const team = data.teams.find((item) => item.Team_ID === invite.Team_ID);
+              return (
+                <div key={invite.Invite_ID} className="flex flex-wrap items-center gap-2 py-1 text-[13px]">
+                  <span className="font-medium">Invitation request</span>
+                  <span className="text-muted">{team?.Name || "A group"} · {invite.Member_Role}</span>
+                  <Button type="button" className="h-7 px-2" onClick={() => void respondInvite(invite.Invite_ID, true).then(() => toast("You joined the group.")).catch((error: Error) => toast(error.message, "error"))}>Accept</Button>
+                  <Button type="button" variant="secondary" className="h-7 px-2" onClick={() => void respondInvite(invite.Invite_ID, false).then(() => toast("Invite declined.")).catch((error: Error) => toast(error.message, "error"))}>Decline</Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <main id="content" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", location.pathname === "/chat" ? "overflow-hidden pb-16 md:pb-0" : "overflow-auto px-3 py-4 pb-24 md:px-4 md:pb-4")}>
           <Outlet context={{ openTask: setTaskId, openCreateTask: (teamId?: string) => setCreateTask(typeof teamId === "string" ? teamId : ""), openCreateMeeting: (date?: string, attendeeIds?: string[]) => setCreateMeeting({ date, attendeeIds }), openMeeting: setMeetingId }} />
         </main>
@@ -188,7 +217,7 @@ export function Shell() {
         ))}
       </nav>
       {installHelp && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 p-4 sm:items-center">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 p-4 sm:items-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallHelp(false); }}>
           <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-xl border border-line bg-white p-5 shadow-xl">
             <h2 className="text-[16px] font-semibold">Add to Home Screen</h2>
             <p className="mt-2 text-[13px] leading-5 text-muted">On iPhone or iPad, open the Share menu and choose Add to Home Screen. On Android or desktop Chrome, open the browser menu and choose Install app.</p>
@@ -199,7 +228,7 @@ export function Shell() {
         </div>
       )}
       {searchOpen && (
-        <div className="fixed inset-0 z-40 flex items-start justify-center bg-slate-900/30 px-4 pt-[12vh]">
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-slate-900/30 px-4 pt-[12vh]" onMouseDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}>
           <div className="w-full max-w-xl rounded-xl border border-line bg-white shadow-xl" role="dialog" aria-label="Search">
             <div className="flex items-center gap-2 border-b border-line px-3">
               <Search size={16} className="text-muted" />

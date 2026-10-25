@@ -665,6 +665,21 @@ export function cancelMeeting(db: BusinessDb, actor: User, meetingId: string, ex
   return meeting;
 }
 
+export function respondMeeting(db: BusinessDb, actor: User, meetingId: string, response: "accepted" | "declined" | "tentative") {
+  const meeting = meetingById(db, meetingId);
+  if (!canViewMeeting(actor, meeting, db.users, db.scopes, db.members)) throw new HttpError(403, "You cannot view this meeting.");
+  if (meeting.Status === "Cancelled") throw new HttpError(400, "This meeting is cancelled.");
+  if (actor.User_ID === meeting.Organized_By) throw new HttpError(400, "The organizer does not respond to their own meeting.");
+  if (!meetingAttendeeIds(meeting).includes(actor.User_ID)) throw new HttpError(403, "You are not invited to this meeting.");
+  const detail = db.meetingDetails.find((item) => item.Meeting_ID === meeting.Meeting_ID);
+  if (!detail) throw new HttpError(404, "Meeting not found.");
+  detail.Invitation_Status = { ...detail.Invitation_Status, [actor.User_ID]: response };
+  meeting.Updated_At = nowIso();
+  const phrase = response === "declined" ? "rejected this meeting" : response === "tentative" ? "wants to postpone this meeting" : "accepted this meeting";
+  notify(db, meeting.Organized_By, actor.User_ID, "meeting_invitation", meeting.Meeting_Title, `${actor.Name} ${phrase}.`, "meeting", meeting.Meeting_ID);
+  return meeting;
+}
+
 export function syncMeeting(db: BusinessDb, actor: User, meetingId: string, google: GoogleEventLink & { status?: string; start?: string; end?: string; location?: string }) {
   const meeting = meetingById(db, meetingId);
   if (!canViewMeeting(actor, meeting, db.users, db.scopes, db.members)) throw new HttpError(403, "You cannot view this meeting.");
@@ -959,7 +974,7 @@ export function createInvite(db: BusinessDb, actor: User, input: { Email: string
   const email = input.Email.toLowerCase();
   if (isPlaceholderEmail(email)) throw new HttpError(400, "Invite a real email address.");
   const existingUser = db.users.find((user) => user.Email.toLowerCase() === email);
-  if (existingUser) throw new HttpError(400, "That person already has an account. Add them to the group.");
+  if (existingUser && onTeam(db.members, existingUser.User_ID, team.Team_ID)) throw new HttpError(400, "That person is already in this group.");
   if (db.invites.some((invite) => invite.Email.toLowerCase() === email && invite.Team_ID === team.Team_ID && invite.Status === "Pending")) {
     throw new HttpError(400, "That person already has a pending invite to this team.");
   }
@@ -976,6 +991,7 @@ export function createInvite(db: BusinessDb, actor: User, input: { Email: string
   };
   db.invites.unshift(invite);
   log(db, actor.User_ID, "invite.sent", "team", team.Team_ID, "", email);
+  if (existingUser) notify(db, existingUser.User_ID, actor.User_ID, "invited", `Invitation to ${team.Name}`, `${actor.Name} invited you to ${team.Name}. Accept it to join.`, "team", team.Team_ID);
   return invite;
 }
 

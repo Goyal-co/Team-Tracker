@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { activitySentence, commentParts, personName } from "../domain/format";
 import { dueLabel, formatDay, formatTime, isOverdue, kolkataToday } from "../domain/dates";
@@ -11,7 +11,7 @@ import { useToast } from "../toast";
 import { OverdueBadge, PriorityBadge, StatusBadge } from "./badges";
 import { EmployeeSelect } from "./employee-select";
 import { activityKind } from "./activity-feed";
-import { Avatar, Button, Drawer, Field, SelectInput, TextArea, TextInput } from "./ui";
+import { Avatar, Button, Drawer, Field, OutsideClose, SelectInput, TextArea, TextInput } from "./ui";
 
 export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   const { data, updateTask, transitionTask, comment, attach } = useWorkspace();
@@ -23,6 +23,8 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
   const [ask, setAsk] = useState<"block" | "return" | null>(null);
   const [note, setNote] = useState("");
   const [caret, setCaret] = useState(0);
+  const [mentionActive, setMentionActive] = useState(0);
+  const [hideMentions, setHideMentions] = useState(false);
   const [busy, setBusy] = useState(false);
   const today = kolkataToday();
   const names = useMemo(() => new Map(data.users.map((user) => [user.User_ID, user.Name])), [data.users]);
@@ -40,15 +42,36 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
     ...comments.map((item) => ({ id: item.Comment_ID, at: item.Created_At, kind: "comment" as const, author: names.get(item.Author_ID) ?? "Someone", body: item.Body })),
   ].sort((a, b) => b.at.localeCompare(a.at));
   const mentionQuery = note.slice(0, caret).match(/(?:^|\s)@([^\n@]*)$/)?.[1] ?? null;
-  const suggestions = mentionQuery === null
+  const suggestions = mentionQuery === null || hideMentions || mentionQuery.trim().length < 2
     ? []
     : data.users.filter((user) => user.Status === "Active" && user.Name.toLowerCase().includes(mentionQuery.trim().toLowerCase())).slice(0, 6);
 
-  function insertMention(user: User) {
-    const before = note.slice(0, caret).replace(/(?:^|\s)@([^\n@]*)$/, (match) => `${match.startsWith(" ") || match.startsWith("\n") ? match[0] : ""}@[${user.Name}](${user.User_ID}) `);
-    const next = `${before}${note.slice(caret)}`;
+  function insertMention(user: User, value = note, cursor = caret) {
+    const before = value.slice(0, cursor).replace(/(?:^|\s)@([^\n@]*)$/, (match) => `${match.startsWith(" ") || match.startsWith("\n") ? match[0] : ""}@[${user.Name}](${user.User_ID}) `);
+    const next = `${before}${value.slice(cursor)}`;
     setNote(next);
     setCaret(before.length);
+    setMentionActive(0);
+  }
+
+  function onMentionKey(event: KeyboardEvent<HTMLTextAreaElement>) {
+    const value = event.currentTarget.value;
+    const cursor = event.currentTarget.selectionStart ?? value.length;
+    const query = value.slice(0, cursor).match(/(?:^|\s)@([^\n@]*)$/)?.[1] ?? null;
+    const matches = query === null || query.trim().length < 2
+      ? []
+      : data.users.filter((user) => user.Status === "Active" && user.Name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 6);
+    if (!matches.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setMentionActive((index) => (index + 1) % matches.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setMentionActive((index) => (index - 1 + matches.length) % matches.length);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insertMention(matches[Math.min(mentionActive, matches.length - 1)], value, cursor);
+    }
   }
 
   async function save() {
@@ -210,6 +233,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
         <div className="space-y-5">
           <section>
             <h3 className="mb-2 text-[13px] font-semibold">Progress update</h3>
+            <OutsideClose active={suggestions.length > 0} onClose={() => setHideMentions(true)}>
             <TextArea
               value={note}
               placeholder="Write an update. Type @ to tag someone."
@@ -217,15 +241,18 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
               onChange={(event) => {
                 setNote(event.target.value);
                 setCaret(event.target.selectionStart ?? event.target.value.length);
+                setMentionActive(0);
+                setHideMentions(false);
               }}
               onClick={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
               onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+              onKeyDown={onMentionKey}
             />
             {suggestions.length > 0 && (
               <ul className="mt-2 overflow-hidden rounded-xl border border-line bg-white" role="listbox" aria-label="People you can tag">
-                {suggestions.map((user) => (
+                {suggestions.map((user, index) => (
                   <li key={user.User_ID}>
-                    <button type="button" className="block w-full px-3 py-2 text-left text-[13px] hover:bg-slate-50" onClick={() => insertMention(user)}>
+                    <button type="button" className={`block w-full px-3 py-2 text-left text-[13px] ${index === mentionActive ? "bg-accent-soft" : "hover:bg-slate-50"}`} onMouseDown={(event) => { event.preventDefault(); insertMention(user); }}>
                       <span className="font-medium">{user.Name}</span>
                       <span className="ml-2 text-muted">{user.Role}</span>
                     </button>
@@ -233,6 +260,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                 ))}
               </ul>
             )}
+            </OutsideClose>
             <div className="mt-2 flex gap-2">
               <Button type="button" variant="secondary" disabled={busy || !note.trim()} onClick={() => void sendComment()}>Comment</Button>
               <label className="inline-flex h-9 cursor-pointer items-center rounded-[10px] border border-line px-3 text-[13px]">

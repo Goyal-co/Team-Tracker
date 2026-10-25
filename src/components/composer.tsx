@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Paperclip, Smile } from "lucide-react";
 import { commentParts } from "../domain/format";
 import type { User, WorkspaceMessage } from "../domain/types";
@@ -56,33 +56,56 @@ export function Composer({
   const [emoji, setEmoji] = useState(false);
   const [busy, setBusy] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const mentionQuery = draft.slice(0, caret).match(/(?:^|\s)@([^\n@]*)$/)?.[1] ?? null;
-  const suggestions = mentionQuery === null || hideMentions
+  const suggestions = mentionQuery === null || hideMentions || mentionQuery.trim().length < 2
     ? []
     : mentions.filter((user) => user.Name.toLowerCase().includes(mentionQuery.trim().toLowerCase())).slice(0, 6);
+
+  useEffect(() => {
+    if (!emoji && suggestions.length === 0) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!popRef.current?.contains(event.target as Node)) {
+        setEmoji(false);
+        setHideMentions(true);
+      }
+    };
+    window.addEventListener("mousedown", onPointer);
+    return () => window.removeEventListener("mousedown", onPointer);
+  }, [emoji, suggestions.length]);
 
   function rememberCaret(target: HTMLInputElement) {
     setCaret(target.selectionStart ?? target.value.length);
   }
 
-  function insertMention(user: User) {
-    const before = draft.slice(0, caret).replace(/(?:^|\s)@([^\n@]*)$/, (match) => `${match.startsWith(" ") ? " " : ""}@[${user.Name}](${user.User_ID}) `);
-    setDraft(`${before}${draft.slice(caret)}`);
+  function matchesFor(value: string, cursor: number) {
+    const query = value.slice(0, cursor).match(/(?:^|\s)@([^\n@]*)$/)?.[1] ?? null;
+    if (query === null || query.trim().length < 2) return [];
+    return mentions.filter((user) => user.Name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 6);
+  }
+
+  function insertMention(user: User, value = draft, cursor = caret) {
+    const before = value.slice(0, cursor).replace(/(?:^|\s)@([^\n@]*)$/, (match) => `${match.startsWith(" ") ? " " : ""}@[${user.Name}](${user.User_ID}) `);
+    setDraft(`${before}${value.slice(cursor)}`);
     setCaret(before.length);
     setActive(0);
+    setHideMentions(false);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (!suggestions.length) return;
+    const value = event.currentTarget.value;
+    const cursor = event.currentTarget.selectionStart ?? value.length;
+    const matches = matchesFor(value, cursor);
+    if (!matches.length) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActive((index) => (index + 1) % suggestions.length);
+      setActive((index) => (index + 1) % matches.length);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActive((index) => (index - 1 + suggestions.length) % suggestions.length);
+      setActive((index) => (index - 1 + matches.length) % matches.length);
     } else if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      insertMention(suggestions[Math.min(active, suggestions.length - 1)]);
+      insertMention(matches[Math.min(active, matches.length - 1)], value, cursor);
     } else if (event.key === "Escape") {
       event.preventDefault();
       setHideMentions(true);
@@ -115,7 +138,7 @@ export function Composer({
           <button type="button" className="text-muted" onClick={() => setFile(null)}>Remove</button>
         </div>
       )}
-      <div className="relative flex items-center gap-1">
+      <div ref={popRef} className="relative flex items-center gap-1">
         {suggestions.length > 0 && (
           <ul className="absolute bottom-full left-16 z-20 mb-2 w-64 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
             {suggestions.map((user, index) => (

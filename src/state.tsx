@@ -23,6 +23,7 @@ interface WorkspaceValue {
   updateMeeting: (id: string, input: unknown) => Promise<Meeting>;
   cancelMeeting: (id: string, updatedAt: string) => Promise<void>;
   syncMeeting: (id: string) => Promise<void>;
+  respondMeeting: (id: string, response: "accepted" | "declined" | "tentative") => Promise<void>;
   availability: (input: unknown) => Promise<{ people: AvailabilityPerson[]; warning: string; live: boolean }>;
   slots: (input: unknown) => Promise<{ slots: Array<{ start: string; end: string; confirmed: boolean }>; warning: string; confirmed: boolean }>;
   saveUser: (input: unknown, id?: string) => Promise<User>;
@@ -80,6 +81,13 @@ export function WorkspaceGate({
     void refresh();
   }, [refresh]);
 
+  const waiting = data?.access === "waiting" ? data.me.User_ID : "";
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => { void refresh(); }, 4000);
+    return () => window.clearInterval(timer);
+  }, [refresh, waiting]);
+
   const watching = data?.access === "workspace" ? data.me.User_ID : "";
   useEffect(() => {
     if (!watching) return;
@@ -133,6 +141,7 @@ export function WorkspaceGate({
           run(async () => (await api<{ meeting: Meeting }>(`/api/meetings/${id}`, { method: "PATCH", body: JSON.stringify(input) })).meeting),
         cancelMeeting: (id, updatedAt) => run(() => api(`/api/meetings/${id}/cancel`, { method: "POST", body: JSON.stringify({ Updated_At: updatedAt }) })),
         syncMeeting: (id) => run(() => api(`/api/meetings/${id}/sync`, { method: "POST" })),
+        respondMeeting: (id, response) => run(() => api(`/api/meetings/${id}/respond`, { method: "POST", body: JSON.stringify({ response }) })),
         availability: (input) => api("/api/calendar/availability", { method: "POST", body: JSON.stringify(input) }),
         slots: (input) => api("/api/calendar/slots", { method: "POST", body: JSON.stringify(input) }),
         saveUser: (input, id) =>

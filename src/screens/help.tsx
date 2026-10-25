@@ -3,7 +3,7 @@ import { PageHeader } from "../components/ui";
 const SECTIONS = [
   {
     title: "Joining the workspace",
-    body: "Anyone can sign in with Google. The first administrator opens the workspace immediately. A new person joins after an email invitation. Someone who already has an account is added straight into a group, with no email. People can belong to several groups. Work in a group is assigned only to people in that group. Chat shows your groups and the people you have already messaged.",
+    body: "Anyone can sign in with Google. The first administrator opens the workspace immediately. Everyone else stays on a waiting screen until they accept an invitation sent to their email. That request appears even if they signed in before the invite was sent. People can belong to several groups. Work in a group is assigned only to people in that group. Chat shows your groups and the people you have already messaged.",
   },
   {
     title: "Tasks, bugs, and features",

@@ -118,7 +118,7 @@ export function Dialog({ title, body, confirmLabel, danger, onConfirm, onClose }
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-xl border border-line bg-white p-5 shadow-xl">
         <h2 className="text-[16px] font-semibold">{title}</h2>
         <p className="mt-2 text-[13px] leading-5 text-muted">{body}</p>
@@ -130,6 +130,19 @@ export function Dialog({ title, body, confirmLabel, danger, onConfirm, onClose }
     </div>,
     document.body,
   );
+}
+
+export function OutsideClose({ active, onClose, className, children }: { active: boolean; onClose: () => void; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener("mousedown", onPointer);
+    return () => window.removeEventListener("mousedown", onPointer);
+  }, [active, onClose]);
+  return <div ref={ref} className={className}>{children}</div>;
 }
 
 const COLORS = ["#1d4ed8", "#0f766e", "#b45309", "#6d28d9", "#be123c", "#334155"];
