@@ -1,3 +1,14 @@
+# Local development stack (the original docker-compose.yml).
+#
+#   docker compose -f compose.local.yml up -d              # postgres + redis only
+#   docker compose -f compose.local.yml --profile app up -d --build   # + built app
+#
+# PostgreSQL is published on host port 5433 so it does not collide with a
+# server already installed on 5432. For `npm run dev` set in .env:
+#   DATABASE_URL=postgres://goyal:goyal@localhost:5433/goyal_workspace
+#   REDIS_URL=redis://localhost:6379
+# Production on EC2 uses docker-compose.yml instead.
+
 name: team-tracker
 
 services:

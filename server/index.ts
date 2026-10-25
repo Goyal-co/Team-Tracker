@@ -121,9 +121,17 @@ async function main() {
     lock: redisReady && redis ? createRedisLock(redis) : createPgLock(pool),
     allow: redisReady && redis ? createRedisRateLimit(redis) : createPgRateLimit(pool),
   });
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`Goyal Workspace API on http://localhost:${config.port} (postgres)`);
   });
+
+  const shutdown = (signal: string) => {
+    console.log(`${signal} received, shutting down.`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((error: unknown) => {
