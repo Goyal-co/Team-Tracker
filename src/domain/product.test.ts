@@ -47,9 +47,9 @@ describe("permissions", () => {
     expect(descendantIds(users, "U-001").size).toBeGreaterThan(0);
   });
 
-  it("keeps employees from editing priority and assigning work", () => {
+  it("lets a group member assign work inside the group and keeps them from editing priority", () => {
     expect(canEditTaskMetadata(user("U-003"), task("T-0001"), db.users, db.scopes, db.members)).toBe(false);
-    expect(canAssignTo(user("U-003"), "U-002", db.users, db.scopes, db.members, "TM-001")).toBe(false);
+    expect(canAssignTo(user("U-003"), "U-002", db.users, db.scopes, db.members, "TM-001")).toBe(true);
     expect(canAssignTo(user("U-002"), "U-003", db.users, db.scopes, db.members, "TM-001")).toBe(true);
     expect(canAssignTo(user("U-005"), "U-003", db.users, db.scopes, db.members, "TM-001")).toBe(false);
   });

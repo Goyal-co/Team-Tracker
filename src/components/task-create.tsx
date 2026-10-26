@@ -69,7 +69,7 @@ export function TaskCreateDrawer({ onClose, onCreated, initialTeamId = "" }: { o
     }
   }
 
-  if (!canCreateTasks(data.me)) return null;
+  if (!canCreateTasks(data.me, data.members)) return null;
   return (
     <Drawer title={`Create ${type.toLowerCase()}`} subtitle={`Assigned by ${data.me.Name}`} onClose={onClose}>
       <form

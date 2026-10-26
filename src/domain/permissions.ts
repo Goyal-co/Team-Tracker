@@ -46,8 +46,10 @@ export function scopedUserIds(actor: User, users: User[], scopes: UserScope[]): 
   return ids;
 }
 
-export function canCreateTasks(actor: User): boolean {
-  return actor.Access_Role !== "Employee";
+export function canCreateTasks(actor: User, members: TeamMember[] = []): boolean {
+  if (actor.Status !== "Active") return false;
+  if (actor.Access_Role === "Admin") return true;
+  return members.some((member) => member.User_ID === actor.User_ID && member.Status === "Active");
 }
 
 export function canBulkEdit(actor: User): boolean {
@@ -68,13 +70,10 @@ function inWorkspace(actor: User, members: TeamMember[]): boolean {
   return members.some((member) => member.User_ID === actor.User_ID && member.Status === "Active");
 }
 
-export function canAssignTo(actor: User, assigneeId: string, users: User[], scopes: UserScope[], members: TeamMember[] = [], teamId = ""): boolean {
-  if (!canCreateTasks(actor) && actor.User_ID !== assigneeId) return false;
-  if (actor.Access_Role === "Employee") return false;
-  if (!scopedUserIds(actor, users, scopes).has(assigneeId)) return false;
-  if (actor.Access_Role !== "Admin" && teamId && !onTeam(members, actor.User_ID, teamId)) return false;
-  if (teamId && !onTeam(members, assigneeId, teamId)) return false;
-  return true;
+export function canAssignTo(actor: User, assigneeId: string, _users: User[], _scopes: UserScope[], members: TeamMember[] = [], teamId = ""): boolean {
+  if (actor.Status !== "Active" || !teamId) return false;
+  if (actor.Access_Role !== "Admin" && !onTeam(members, actor.User_ID, teamId)) return false;
+  return onTeam(members, assigneeId, teamId);
 }
 
 export function effectiveReviewer(task: Task, workflow?: TaskWorkflow): string {

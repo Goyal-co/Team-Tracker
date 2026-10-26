@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { activitySentence, commentParts, personName } from "../domain/format";
 import { dueLabel, formatDay, formatTime, isOverdue, kolkataToday } from "../domain/dates";
-import { canEditTaskMetadata, canReview, effectiveReviewer } from "../domain/permissions";
+import { canAssignTo, canEditTaskMetadata, canReview, effectiveReviewer } from "../domain/permissions";
 import { allowedTargets } from "../domain/workflow";
 import { PRIORITIES, SEVERITIES, type Priority, type TaskStatus, type User } from "../domain/types";
 import { fileMime, fileToBase64 } from "../lib";
@@ -32,6 +32,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
   const record = task;
   const fields = draft;
   const editable = canEditTaskMetadata(data.me, task, data.users, data.scopes, data.members);
+  const canReassign = canAssignTo(data.me, task.Assigned_To, data.users, data.scopes, data.members, task.Team_ID);
   const targets = allowedTargets({ actor: data.me, task, workflow, users: data.users, scopes: data.scopes, members: data.members });
   const reviewer = canReview(data.me, task, workflow, data.users, data.scopes, data.members);
   const overdue = isOverdue(task, today);
@@ -164,9 +165,13 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
             <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted">People and dates</h3>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Owner">
-              {editable ? (
+              {editable || canReassign ? (
                 <EmployeeSelect users={data.users.filter((user) => user.Status === "Active" && data.members.some((member) => member.Team_ID === task.Team_ID && member.User_ID === user.User_ID && member.Status === "Active"))} value={draft.Assigned_To} onChange={(id) => {
                   const person = data.users.find((user) => user.User_ID === id);
+                  if (!editable) {
+                    void updateTask(record.Task_ID, { Updated_At: record.Updated_At, Assigned_To: id }).then(() => toast("Work reassigned.")).catch((error: Error) => toast(error.message, "error"));
+                    return;
+                  }
                   setDraft({ ...draft, Assigned_To: id, Department: person?.Department ?? draft.Department });
                 }} />
               ) : <p className="text-[13px]">{names.get(task.Assigned_To)}</p>}

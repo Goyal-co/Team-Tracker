@@ -11,7 +11,7 @@ describe("workspace actions", () => {
     const mia = db.users.find((user) => user.User_ID === "U-003") as User;
     const task = db.tasks.find((item) => item.Task_ID === "T-0001");
     expect(() => transitionTask(db, mia, "T-0001", "Completed", "", task?.Updated_At || "")).toThrow(/cannot review|Cannot move/i);
-    expect(() => createTask(db, mia, taskInput())).toThrow(/cannot create/i);
+    expect(createTask(db, mia, taskInput()).Assigned_To).toBe("U-003");
   });
 
   it("issues the next project key and notifies a mention", () => {

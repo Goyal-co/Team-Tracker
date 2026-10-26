@@ -86,7 +86,7 @@ export function TeamPage() {
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
             <h2 className="text-[16px] font-semibold">{team.Name}</h2>
             <div className="flex gap-2">
-              {canCreateTasks(data.me) && <Button type="button" onClick={() => shell.openCreateTask(teamId)}>Assign work</Button>}
+              {canCreateTasks(data.me, data.members) && <Button type="button" onClick={() => shell.openCreateTask(teamId)}>Assign work</Button>}
               <Button type="button" variant="secondary" onClick={() => navigate(`/chat?group=${teamId}`)}>Open chat</Button>
             </div>
           </div>

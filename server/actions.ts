@@ -252,7 +252,7 @@ export function createTask(
   },
 ) {
   if (!hasWorkspaceAccess(db, actor)) throw new HttpError(403, "Accept an invite before opening the workspace.");
-  if (!canCreateTasks(actor)) throw new HttpError(403, "You cannot create work.");
+  if (!canCreateTasks(actor, db.members)) throw new HttpError(403, "You cannot create work.");
   const team = db.teams.find((item) => item.Team_ID === input.Team_ID && item.Status === "Active");
   if (!team) throw new HttpError(400, "Choose an active team.");
   if (actor.Access_Role !== "Admin" && !onTeam(db.members, actor.User_ID, team.Team_ID)) {
@@ -322,7 +322,22 @@ export function updateTask(
 ) {
   const task = requireVisibleTask(db, actor, taskId);
   assertFresh(task.Updated_At, patch.Updated_At);
-  if (!canEditTaskMetadata(actor, task, db.users, db.scopes, db.members)) {
+  const assigning = Boolean(patch.Assigned_To && patch.Assigned_To !== task.Assigned_To);
+  const changingDetails = Boolean(
+    (patch.Task_Title && patch.Task_Title !== task.Task_Title)
+    || (patch.Description !== undefined && patch.Description !== task.Description)
+    || (patch.Priority && patch.Priority !== task.Priority)
+    || (patch.Start_Date !== undefined && patch.Start_Date !== task.Start_Date)
+    || (patch.Due_Date && patch.Due_Date !== task.Due_Date)
+    || (patch.Labels !== undefined && patch.Labels !== task.Labels)
+    || (patch.Severity !== undefined && patch.Severity !== task.Severity)
+    || (patch.Department && patch.Department !== task.Department)
+    || (patch.Remarks !== undefined && patch.Remarks !== task.Remarks),
+  );
+  if (changingDetails && !canEditTaskMetadata(actor, task, db.users, db.scopes, db.members)) {
+    throw new HttpError(403, "You cannot change the deadline, priority, or details of this task.");
+  }
+  if (!assigning && !changingDetails && !canEditTaskMetadata(actor, task, db.users, db.scopes, db.members)) {
     throw new HttpError(403, "You cannot change the deadline, priority, or details of this task.");
   }
   let genericChange = false;

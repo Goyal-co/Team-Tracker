@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from "react-router-dom";
-import { Bell, CalendarDays, CircleHelp, Download, History, LayoutDashboard, ListChecks, LogOut, Menu, MessageSquare, Plus, Search, Settings, Users, X } from "lucide-react";
+import { Bell, CalendarDays, CircleHelp, Download, History, LayoutDashboard, ListChecks, LogOut, Menu, MessageSquare, PanelLeft, Plus, Search, Settings, Users, X } from "lucide-react";
 import { formatLongDate } from "../domain/dates";
 import { canCreateTasks } from "../domain/permissions";
 import { cn } from "../lib";
@@ -26,6 +26,7 @@ export function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobile, setMobile] = useState(false);
+  const [expanded, setExpanded] = useState(() => window.localStorage.getItem("goyal-sidebar") !== "collapsed");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
@@ -60,6 +61,10 @@ export function Shell() {
     await installEvent.prompt();
     setInstallEvent(null);
   }
+
+  useEffect(() => {
+    window.localStorage.setItem("goyal-sidebar", expanded ? "expanded" : "collapsed");
+  }, [expanded]);
 
   useEffect(() => {
     setMobile(false);
@@ -99,36 +104,54 @@ export function Shell() {
     };
   }, [data.meetings, data.tasks, data.users, query]);
 
-  const railItem = "flex w-full flex-col items-center gap-1 rounded-lg px-1.5 py-2 text-center text-[11px] leading-3";
+  const showLabels = expanded || mobile;
+  const navItem = cn("flex w-full items-center rounded-lg", showLabels ? "flex-row flex-nowrap gap-3 px-3 py-2 text-left text-[13px]" : "flex-col gap-1 px-1.5 py-2 text-center text-[11px] leading-3");
 
   return (
     <div className="flex h-full min-h-screen bg-canvas">
-      <aside className={cn("fixed inset-y-0 left-0 z-30 flex w-[108px] flex-col border-r border-line bg-white md:static", mobile ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
-        <div className="flex h-14 items-center justify-center">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-white">G</span>
+      <aside className={cn("fixed inset-y-0 left-0 z-30 flex flex-col border-r border-line bg-white transition-[width] duration-200 md:static", showLabels ? "w-64" : "w-[72px]", mobile ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
+        <div className={cn("flex h-14 shrink-0 flex-row flex-nowrap items-center", showLabels ? "gap-2 px-3" : "justify-center")}>
+          {showLabels ? (
+            <>
+              <span className="flex min-w-0 flex-1 flex-row flex-nowrap items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-white">G</span>
+                <span className="truncate whitespace-nowrap text-[13px] font-semibold leading-none">Goyal Workspace</span>
+              </span>
+              <button type="button" className="hidden shrink-0 rounded-lg p-1.5 text-muted hover:bg-slate-50 md:inline-flex" aria-label="Collapse sidebar" onClick={() => setExpanded(false)}>
+                <PanelLeft size={18} />
+              </button>
+            </>
+          ) : (
+            <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-white" aria-label="Expand sidebar" title="Expand sidebar" onClick={() => setExpanded(true)}>G</button>
+          )}
         </div>
-        <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1.5" aria-label="Primary">
+        <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2" aria-label="Primary">
           {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} title={item.label} className={({ isActive }) => cn(railItem, isActive ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
-              <item.icon size={18} />
-              <span className="w-full truncate">{item.label}</span>
+            <NavLink key={item.to} to={item.to} end={item.end} title={item.label} className={({ isActive }) => cn(navItem, isActive ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
+              <item.icon size={18} className="shrink-0" />
+              {showLabels && <span className="truncate">{item.label}</span>}
             </NavLink>
           ))}
         </nav>
-        <div className="flex flex-col items-center gap-1 border-t border-line px-1.5 py-2">
-          <NavLink to="/settings" title="Settings" className={({ isActive }) => cn(railItem, isActive ? "bg-accent-soft text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
-            <Settings size={18} /><span>Settings</span>
+        <div className="flex flex-col gap-0.5 border-t border-line px-2 py-2">
+          <NavLink to="/settings" title="Settings" className={({ isActive }) => cn(navItem, isActive ? "bg-accent-soft text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
+            <Settings size={18} className="shrink-0" />{showLabels && <span>Settings</span>}
           </NavLink>
-          <NavLink to="/help" title="Help" className={({ isActive }) => cn(railItem, isActive ? "bg-accent-soft text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
-            <CircleHelp size={18} /><span>Help</span>
+          <NavLink to="/help" title="Help" className={({ isActive }) => cn(navItem, isActive ? "bg-accent-soft text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
+            <CircleHelp size={18} className="shrink-0" />{showLabels && <span>Help</span>}
           </NavLink>
           {!standalone && (
-            <button type="button" title="Add to Home Screen" className={cn(railItem, "text-muted hover:bg-slate-50 hover:text-ink")} onClick={() => void installApp()}>
-              <Download size={18} /><span>Install</span>
+            <button type="button" title="Add to Home Screen" className={cn(navItem, "text-muted hover:bg-slate-50 hover:text-ink")} onClick={() => void installApp()}>
+              <Download size={18} className="shrink-0" />{showLabels && <span>Install</span>}
             </button>
           )}
-          <button type="button" title={data.me.Name} aria-label="Your profile" className="mt-1" onClick={() => navigate(`/team/${data.me.User_ID}`)}><Avatar name={data.me.Name} size={28} /></button>
-          <button type="button" title="Sign out" aria-label="Sign out" onClick={() => void signOut()} className="rounded-lg p-1.5 text-muted hover:bg-slate-50 hover:text-ink"><LogOut size={16} /></button>
+          <button type="button" title={data.me.Name} aria-label="Your profile" className={cn(navItem, "text-ink hover:bg-slate-50")} onClick={() => navigate(`/team/${data.me.User_ID}`)}>
+            <Avatar name={data.me.Name} size={28} />
+            {showLabels && <span className="truncate">{data.me.Name}</span>}
+          </button>
+          <button type="button" title="Sign out" aria-label="Sign out" onClick={() => void signOut()} className={cn(navItem, "text-muted hover:bg-slate-50 hover:text-ink")}>
+            <LogOut size={16} className="shrink-0" />{showLabels && <span>Sign out</span>}
+          </button>
         </div>
       </aside>
       {mobile && <button className="fixed inset-0 z-20 bg-slate-900/30 md:hidden" aria-label="Close menu" onClick={() => setMobile(false)} />}
@@ -146,7 +169,7 @@ export function Shell() {
             <Button type="button" className="px-2 sm:px-3" onClick={() => { setNotesOpen(false); setQuick((value) => !value); }}><Plus size={15} /><span className="hidden sm:inline">Quick create</span></Button>
             {quick && (
               <div className="absolute right-0 z-20 mt-1 w-48 rounded-xl border border-line bg-white p-1 shadow-lg">
-                {canCreateTasks(data.me) && <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-slate-50" onClick={() => { setQuick(false); setCreateTask(""); }}>Create work</button>}
+                {canCreateTasks(data.me, data.members) && <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-slate-50" onClick={() => { setQuick(false); setCreateTask(""); }}>Create work</button>}
                 <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-slate-50" onClick={() => { setQuick(false); setCreateMeeting({}); }}>Schedule meeting</button>
               </div>
             )}
