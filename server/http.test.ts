@@ -35,15 +35,28 @@ const config: AppConfig = {
   dataDir: "data",
   cookieSecure: false,
   trustProxy: false,
+  vapidPublicKey: "",
+  vapidPrivateKey: "",
+  vapidSubject: "mailto:test@localhost",
 };
 
 describe("http authorization", () => {
   const store = memoryStore(companyFixture(NOW));
+  let version = "1";
   const sessions: { tokenHash: string; userId: string; expiresAt: string }[] = [];
   const tokens: { userId: string; refreshToken: string; accessToken: string; expiresAt: string }[] = [];
   const app = createApp({
     config,
     store,
+    versions: {
+      async get() {
+        return version;
+      },
+      async incr() {
+        version = String(Number(version) + 1);
+        return version;
+      },
+    },
     sessions: {
       get(tokenHash: string) {
         return sessions.find((item) => item.tokenHash === tokenHash && item.expiresAt > new Date().toISOString()) ?? null;

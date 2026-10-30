@@ -29,6 +29,8 @@ interface WorkspaceValue {
   saveUser: (input: unknown, id?: string) => Promise<User>;
   saveProfileName: (name: string) => Promise<User>;
   createTeam: (input: { Name: string; Description: string }) => Promise<Team>;
+  renameTeam: (teamId: string, name: string) => Promise<Team>;
+  deleteTeam: (teamId: string) => Promise<void>;
   sendMessage: (teamId: string, body: string, file?: { File_Name: string; Mime_Type: string; Content_Base64: string }) => Promise<void>;
   sendDirectMessage: (recipientId: string, body: string, file?: { File_Name: string; Mime_Type: string; Content_Base64: string }) => Promise<void>;
   createProject: (input: { Team_ID: string; Name: string; Key: string }) => Promise<void>;
@@ -39,6 +41,8 @@ interface WorkspaceValue {
   markRead: (ids: string[] | "all") => Promise<void>;
   saveSettings: (input: unknown) => Promise<void>;
   disconnectCalendar: () => Promise<void>;
+  enablePush: () => Promise<boolean>;
+  disablePush: () => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -89,23 +93,26 @@ export function WorkspaceGate({
   }, [refresh, waiting]);
 
   const watching = data?.access === "workspace" ? data.me.User_ID : "";
+  const syncVersion = data?.access === "workspace" ? (data.dbVersion || "0") : "";
   useEffect(() => {
     if (!watching) return;
     const pull = () => {
-      void api<{ messages: WorkspaceMessage[] }>("/api/messages")
+      void api<Bootstrap & { unchanged?: boolean }>(`/api/sync?v=${encodeURIComponent(syncVersion || "0")}`)
         .then((next) => {
+          if (next.unchanged) return;
           setData((current) => {
-            if (!current) return current;
-            const previous = current.messages ?? [];
-            const same = previous.length === next.messages.length && previous[previous.length - 1]?.Message_ID === next.messages[next.messages.length - 1]?.Message_ID;
-            return same ? current : { ...current, messages: next.messages };
+            if (!current) return next;
+            const incoming = Number(next.dbVersion || 0);
+            const existing = Number(current.dbVersion || 0);
+            if (Number.isFinite(incoming) && Number.isFinite(existing) && incoming < existing) return current;
+            return next;
           });
         })
         .catch(() => undefined);
     };
-    const timer = window.setInterval(pull, 3000);
+    const timer = window.setInterval(pull, 2500);
     return () => window.clearInterval(timer);
-  }, [watching]);
+  }, [watching, syncVersion]);
 
   function keepMessage(message: WorkspaceMessage) {
     setData((current) => {
@@ -149,6 +156,8 @@ export function WorkspaceGate({
         saveProfileName: (name) =>
           run(async () => (await api<{ user: User }>("/api/me", { method: "PATCH", body: JSON.stringify({ Name: name }) })).user),
         createTeam: (input) => run(async () => (await api<{ team: Team }>("/api/teams", { method: "POST", body: JSON.stringify(input) })).team),
+        renameTeam: (teamId, name) => run(async () => (await api<{ team: Team }>(`/api/teams/${teamId}`, { method: "PATCH", body: JSON.stringify({ Name: name }) })).team),
+        deleteTeam: (teamId) => run(() => api(`/api/teams/${teamId}`, { method: "DELETE" })),
         sendMessage: async (teamId, body, file) => {
           const sent = await api<{ message: WorkspaceMessage }>(`/api/teams/${teamId}/messages`, { method: "POST", body: JSON.stringify({ Body: body, ...file }) });
           keepMessage(sent.message);
@@ -169,9 +178,64 @@ export function WorkspaceGate({
         saveSettings: (input) => run(() => api("/api/settings", { method: "PUT", body: JSON.stringify(input) })),
         markRead: (ids) => run(() => api("/api/notifications/read", { method: "POST", body: JSON.stringify(ids === "all" ? { all: true } : { ids }) })),
         disconnectCalendar: () => run(() => api("/api/google/calendar/disconnect", { method: "POST" })),
+        enablePush: async () => {
+          if (!data.pushReady || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return false;
+          await navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") return false;
+          const key = await api<{ publicKey: string; ready: boolean }>("/api/push/vapid-public-key");
+          if (!key.ready || !key.publicKey) return false;
+          const registration = await navigator.serviceWorker.ready;
+          const applicationServerKey = urlBase64ToUint8Array(key.publicKey);
+          const existing = await registration.pushManager.getSubscription();
+          const sameKey = existing?.options.applicationServerKey
+            && bufferToBase64Url(existing.options.applicationServerKey) === key.publicKey;
+          if (existing && !sameKey) {
+            await api("/api/push/subscribe", { method: "DELETE", body: JSON.stringify({ endpoint: existing.endpoint }) }).catch(() => undefined);
+            await existing.unsubscribe().catch(() => undefined);
+          }
+          const subscription = (existing && sameKey)
+            ? existing
+            : await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+          const json = subscription.toJSON();
+          await api("/api/push/subscribe", {
+            method: "POST",
+            body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+          });
+          window.localStorage.setItem("goyal-push", "on");
+          return true;
+        },
+        disablePush: async () => {
+          if ("serviceWorker" in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.getSubscription();
+            if (subscription) {
+              await api("/api/push/subscribe", { method: "DELETE", body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => undefined);
+              await subscription.unsubscribe().catch(() => undefined);
+            }
+          }
+          window.localStorage.setItem("goyal-push", "off");
+        },
       }
     : null;
 
   if (!value) return <>{children({ data, loading, error, unauthorized, retry: () => void refresh() })}</>;
   return <WorkspaceContext.Provider value={value}>{children({ data, loading, error, unauthorized, retry: () => void refresh() })}</WorkspaceContext.Provider>;
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
+function bufferToBase64Url(value: ArrayBuffer | null) {
+  if (!value) return "";
+  const bytes = new Uint8Array(value);
+  let raw = "";
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return window.btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }

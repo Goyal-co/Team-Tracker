@@ -1,5 +1,5 @@
 import { addDays, isOverdue, kolkataToday, kolkataToIso } from "../src/domain/dates";
-import { isPlaceholderEmail, joinIds, nextId } from "../src/domain/ids";
+import { isPlaceholderEmail, joinIds, nextId, splitIds } from "../src/domain/ids";
 import {
   canAssignTo,
   canBulkEdit,
@@ -13,6 +13,7 @@ import {
   effectiveReviewer,
   meetingAttendeeIds,
   scopedUserIds,
+  taskCcIds,
 } from "../src/domain/permissions";
 import { findSlots, mergeAvailability, overlaps, type ExternalCalendar } from "../src/domain/availability";
 import { transitionAllowed } from "../src/domain/workflow";
@@ -32,6 +33,41 @@ import type {
 import { mentionIds } from "../src/domain/format";
 import { canInviteToTeam, hasWorkspaceAccess, higherRole, onTeam } from "../src/domain/workspace";
 import { HttpError } from "./errors";
+
+function normalizeCc(db: BusinessDb, teamId: string, assigneeId: string, ids: string[] | undefined) {
+  const unique = Array.from(new Set((ids ?? []).map((id) => id.trim()).filter(Boolean)));
+  for (const id of unique) {
+    if (id === assigneeId) continue;
+    if (!onTeam(db.members, id, teamId)) throw new HttpError(400, "CC people must be active members of this group.");
+    const person = db.users.find((user) => user.User_ID === id);
+    if (!person || person.Status !== "Active") throw new HttpError(400, "CC people must be active members of this group.");
+  }
+  return joinIds(unique.filter((id) => id !== assigneeId));
+}
+
+function notifyCc(db: BusinessDb, task: Task, actorId: string, type: NotificationType, title: string, body: string) {
+  for (const id of taskCcIds(task)) {
+    notify(db, id, actorId, type, title, body, "task", task.Task_ID);
+  }
+}
+
+function notifyReviewAudience(db: BusinessDb, task: Task, workflow: { Task_ID: string; Reviewer_ID: string; Blocked_Reason: string; Review_Note: string }, actorId: string) {
+  const targets = new Set<string>([task.Assigned_By, effectiveReviewer(task, workflow)]);
+  for (const id of taskCcIds(task)) {
+    const person = db.users.find((user) => user.User_ID === id);
+    if (person && (person.Access_Role === "Manager" || person.Access_Role === "Admin")) targets.add(id);
+  }
+  for (const id of targets) {
+    notify(db, id, actorId, "submitted_for_review", "Task submitted for review", task.Task_Title, "task", task.Task_ID);
+  }
+}
+
+type PushDispatch = (recipientId: string, title: string, body: string, entityType: string, entityId: string) => void;
+let pushDispatch: PushDispatch | null = null;
+
+export function setPushDispatch(fn: PushDispatch | null) {
+  pushDispatch = fn;
+}
 
 export interface GoogleEventLink {
   eventId: string;
@@ -111,6 +147,7 @@ function notify(
   entityId: string,
 ) {
   if (!recipientId || recipientId === actorId) return;
+  pushDispatch?.(recipientId, title, body, entityType, entityId);
   db.notifications.unshift({
     Notification_ID: nextId("N-", db.notifications.map((item) => item.Notification_ID), 4),
     Recipient_ID: recipientId,
@@ -249,6 +286,7 @@ export function createTask(
     Department: string;
     Reviewer_ID: string;
     Remarks: string;
+    CC_User_Ids?: string[];
   },
 ) {
   if (!hasWorkspaceAccess(db, actor)) throw new HttpError(403, "Accept an invite before opening the workspace.");
@@ -266,6 +304,7 @@ export function createTask(
     throw new HttpError(403, "You cannot assign work to that person.");
   }
   if (input.Type === "Bug" && !input.Severity) throw new HttpError(400, "A bug needs a severity.");
+  const cc = normalizeCc(db, team.Team_ID, assignee.User_ID, input.CC_User_Ids);
   const reviewer = actor;
   const stamp = nowIso();
   const number = project.Next_Number || 1;
@@ -292,12 +331,14 @@ export function createTask(
     Key: `${project.Key}-${number}`,
     Severity: input.Type === "Bug" ? input.Severity : "",
     Labels: input.Labels,
+    CC_User_Ids: cc,
   };
   db.tasks.unshift(task);
   db.workflows.push({ Task_ID: task.Task_ID, Reviewer_ID: reviewer.User_ID, Blocked_Reason: "", Review_Note: "" });
   log(db, actor.User_ID, "task.created", "task", task.Task_ID, "", task.Task_Title);
   log(db, actor.User_ID, "task.assigned", "task", task.Task_ID, "", assignee.Name);
   notify(db, assignee.User_ID, actor.User_ID, "task_assigned", "New task assigned", task.Task_Title, "task", task.Task_ID);
+  notifyCc(db, task, actor.User_ID, "task_assigned", "Added on CC", task.Task_Title);
   return task;
 }
 
@@ -318,11 +359,13 @@ export function updateTask(
     Department?: string;
     Reviewer_ID?: string;
     Remarks?: string;
+    CC_User_Ids?: string[];
   },
 ) {
   const task = requireVisibleTask(db, actor, taskId);
   assertFresh(task.Updated_At, patch.Updated_At);
   const assigning = Boolean(patch.Assigned_To && patch.Assigned_To !== task.Assigned_To);
+  const changingCc = patch.CC_User_Ids !== undefined;
   const changingDetails = Boolean(
     (patch.Task_Title && patch.Task_Title !== task.Task_Title)
     || (patch.Description !== undefined && patch.Description !== task.Description)
@@ -334,10 +377,15 @@ export function updateTask(
     || (patch.Department && patch.Department !== task.Department)
     || (patch.Remarks !== undefined && patch.Remarks !== task.Remarks),
   );
-  if (changingDetails && !canEditTaskMetadata(actor, task, db.users, db.scopes, db.members)) {
+  const canMeta = canEditTaskMetadata(actor, task, db.users, db.scopes, db.members);
+  const canCc = canMeta || task.Assigned_By === actor.User_ID || actor.Access_Role === "Admin";
+  if (changingDetails && !canMeta) {
     throw new HttpError(403, "You cannot change the deadline, priority, or details of this task.");
   }
-  if (!assigning && !changingDetails && !canEditTaskMetadata(actor, task, db.users, db.scopes, db.members)) {
+  if (changingCc && !canCc) {
+    throw new HttpError(403, "You cannot change who is on CC for this task.");
+  }
+  if (!assigning && !changingDetails && !changingCc && !canMeta) {
     throw new HttpError(403, "You cannot change the deadline, priority, or details of this task.");
   }
   let genericChange = false;
@@ -349,9 +397,9 @@ export function updateTask(
     }
     const previous = nameOf(db, task.Assigned_To);
     task.Assigned_To = assignee.User_ID;
-    task.Assigned_By = actor.User_ID;
     ensureWorkflow(db, task).Reviewer_ID = actor.User_ID;
     if (!patch.Department) task.Department = assignee.Department;
+    if (task.CC_User_Ids) task.CC_User_Ids = normalizeCc(db, task.Team_ID, assignee.User_ID, splitIds(task.CC_User_Ids));
     log(db, actor.User_ID, "task.assigned", "task", task.Task_ID, previous, assignee.Name);
     notify(db, assignee.User_ID, actor.User_ID, "task_assigned", "New task assigned", task.Task_Title, "task", task.Task_ID);
   }
@@ -392,6 +440,19 @@ export function updateTask(
     task.Remarks = patch.Remarks;
     genericChange = true;
   }
+  if (patch.CC_User_Ids !== undefined) {
+    const next = normalizeCc(db, task.Team_ID, task.Assigned_To, patch.CC_User_Ids);
+    if (next !== task.CC_User_Ids) {
+      const previous = task.CC_User_Ids;
+      task.CC_User_Ids = next;
+      log(db, actor.User_ID, "task.cc", "task", task.Task_ID, previous, next);
+      for (const id of splitIds(next)) {
+        if (!splitIds(previous).includes(id)) {
+          notify(db, id, actor.User_ID, "task_assigned", "Added on CC", task.Task_Title, "task", task.Task_ID);
+        }
+      }
+    }
+  }
   task.Updated_At = nowIso();
   if (genericChange) log(db, actor.User_ID, "task.updated", "task", task.Task_ID, "", task.Task_Title);
   return task;
@@ -431,16 +492,7 @@ export function transitionTask(
     log(db, actor.User_ID, "task.status", "task", task.Task_ID, from, to === "Blocked" ? `Blocked: ${reason.trim()}` : to);
   }
   if (to === "Under Review") {
-    notify(
-      db,
-      effectiveReviewer(task, workflow),
-      actor.User_ID,
-      "submitted_for_review",
-      "Task submitted for review",
-      task.Task_Title,
-      "task",
-      task.Task_ID,
-    );
+    notifyReviewAudience(db, task, workflow, actor.User_ID);
   }
   if (from === "Under Review" && to === "In Progress") {
     workflow.Review_Note = reason.trim();
@@ -964,6 +1016,46 @@ export function createTeam(db: BusinessDb, actor: User, input: { Name: string; D
   db.members.push({ Team_ID: team.Team_ID, User_ID: actor.User_ID, Member_Role: "Lead", Status: "Active", Joined_At: nowIso() });
   log(db, actor.User_ID, "team.created", "team", team.Team_ID, "", team.Name);
   return team;
+}
+
+export function renameTeam(db: BusinessDb, actor: User, teamId: string, nameInput: string) {
+  if (actor.Access_Role !== "Admin") throw new HttpError(403, "Only an administrator can rename a group.");
+  const team = db.teams.find((item) => item.Team_ID === teamId && item.Status === "Active");
+  if (!team) throw new HttpError(404, "That group was not found.");
+  const name = nameInput.trim();
+  if (name.length < 2) throw new HttpError(400, "Enter a team name.");
+  if (db.teams.some((item) => item.Team_ID !== teamId && item.Status === "Active" && item.Name.toLowerCase() === name.toLowerCase())) {
+    throw new HttpError(400, "A group already uses that name.");
+  }
+  const previous = team.Name;
+  team.Name = name;
+  log(db, actor.User_ID, "team.renamed", "team", team.Team_ID, previous, name);
+  return team;
+}
+
+export function deleteTeam(db: BusinessDb, actor: User, teamId: string) {
+  if (actor.Access_Role !== "Admin") throw new HttpError(403, "Only an administrator can delete a group.");
+  const team = db.teams.find((item) => item.Team_ID === teamId);
+  if (!team) throw new HttpError(404, "That group was not found.");
+  const taskIds = new Set(db.tasks.filter((task) => task.Team_ID === teamId).map((task) => task.Task_ID));
+  const storageRefs: string[] = [];
+  for (const file of db.attachments) {
+    if (taskIds.has(file.Task_ID) && file.Storage_Ref) storageRefs.push(file.Storage_Ref);
+  }
+  for (const message of db.messages ?? []) {
+    if (message.Team_ID === teamId && message.Storage_Ref) storageRefs.push(message.Storage_Ref);
+  }
+  db.attachments = db.attachments.filter((item) => !taskIds.has(item.Task_ID));
+  db.comments = db.comments.filter((item) => !taskIds.has(item.Task_ID));
+  db.workflows = db.workflows.filter((item) => !taskIds.has(item.Task_ID));
+  db.tasks = db.tasks.filter((item) => item.Team_ID !== teamId);
+  db.messages = (db.messages ?? []).filter((item) => item.Team_ID !== teamId);
+  db.invites = db.invites.filter((item) => item.Team_ID !== teamId);
+  db.members = db.members.filter((item) => item.Team_ID !== teamId);
+  db.projects = db.projects.filter((item) => item.Team_ID !== teamId);
+  db.teams = db.teams.filter((item) => item.Team_ID !== teamId);
+  log(db, actor.User_ID, "team.deleted", "team", teamId, team.Name, "");
+  return { teamId, storageRefs };
 }
 
 export function createProject(db: BusinessDb, actor: User, input: { Team_ID: string; Name: string; Key: string }) {

@@ -81,5 +81,6 @@ function task(
     Key: key,
     Severity: severity,
     Labels: type === "Bug" ? "login" : "",
+    CC_User_Ids: "",
   };
 }

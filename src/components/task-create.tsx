@@ -4,7 +4,7 @@ import { canCreateTasks } from "../domain/permissions";
 import { SEVERITIES, WORK_TYPES, type Priority, type WorkType } from "../domain/types";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
-import { EmployeeSelect } from "./employee-select";
+import { EmployeeMultiSelect, EmployeeSelect } from "./employee-select";
 import { Button, Drawer, Field, SelectInput, TextArea, TextInput } from "./ui";
 
 const PRIORITIES: Priority[] = ["Low", "Medium", "High", "Urgent"];
@@ -16,6 +16,7 @@ export function TaskCreateDrawer({ onClose, onCreated, initialTeamId = "" }: { o
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [cc, setCc] = useState<string[]>([]);
   const [teamId, setTeamId] = useState(initialTeamId);
   const [projectId, setProjectId] = useState("");
   const [type, setType] = useState<WorkType>("Task");
@@ -29,6 +30,7 @@ export function TaskCreateDrawer({ onClose, onCreated, initialTeamId = "" }: { o
   const teams = data.teams.filter((team) => team.Status === "Active" && (data.me.Access_Role === "Admin" || data.members.some((member) => member.Team_ID === team.Team_ID && member.User_ID === data.me.User_ID && member.Status === "Active")));
   const projects = data.projects.filter((project) => project.Team_ID === teamId && project.Status === "Active");
   const people = data.users.filter((user) => user.Status === "Active" && data.members.some((member) => member.User_ID === user.User_ID && member.Team_ID === teamId && member.Status === "Active"));
+  const ccPeople = people.filter((user) => user.User_ID !== assignee);
   const firstTeamId = teams[0]?.Team_ID ?? "";
   useEffect(() => {
     if (!teamId && firstTeamId) setTeamId(firstTeamId);
@@ -53,6 +55,7 @@ export function TaskCreateDrawer({ onClose, onCreated, initialTeamId = "" }: { o
         Department: assigneeUser?.Department ?? "",
         Reviewer_ID: "",
         Remarks: remarks,
+        CC_User_Ids: cc.filter((id) => id !== assignee),
       });
       toast(`${task.Key} assigned to ${assigneeUser?.Name ?? "the owner"}.`);
       if (another) {
@@ -89,7 +92,7 @@ export function TaskCreateDrawer({ onClose, onCreated, initialTeamId = "" }: { o
             </SelectInput>
           </Field>
           <Field label="Workspace">
-            <SelectInput value={teamId} onChange={(event) => { setTeamId(event.target.value); setProjectId(""); setAssignee(""); }} required>
+            <SelectInput value={teamId} onChange={(event) => { setTeamId(event.target.value); setProjectId(""); setAssignee(""); setCc([]); }} required>
               <option value="">Choose</option>
               {teams.map((team) => <option key={team.Team_ID} value={team.Team_ID}>{team.Name}</option>)}
             </SelectInput>
@@ -109,11 +112,14 @@ export function TaskCreateDrawer({ onClose, onCreated, initialTeamId = "" }: { o
           <EmployeeSelect
             users={people}
             value={assignee}
-            onChange={setAssignee}
+            onChange={(id) => { setAssignee(id); setCc((current) => current.filter((item) => item !== id)); }}
             emptyLabel={teamId ? "Nobody else is in this group yet. Invite them from the workspace." : "Choose a workspace first."}
           />
         </Field>
-        <p className="text-[12px] leading-5 text-muted">Work stays in this group and can only be assigned to someone in it. They update it, then you review it.</p>
+        <Field label="CC" hint="Managers or admins on CC can approve. Employees on CC can follow the work but cannot approve.">
+          <EmployeeMultiSelect users={ccPeople} value={cc} onChange={setCc} />
+        </Field>
+        <p className="text-[12px] leading-5 text-muted">Work stays in this group. You created it, so you can approve it; managers or admins on CC can also approve.</p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Priority">
             <SelectInput value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>

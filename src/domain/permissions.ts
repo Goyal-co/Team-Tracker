@@ -80,13 +80,19 @@ export function effectiveReviewer(task: Task, workflow?: TaskWorkflow): string {
   return workflow?.Reviewer_ID || task.Assigned_By;
 }
 
+export function taskCcIds(task: Task): string[] {
+  return splitIds(task.CC_User_Ids || "");
+}
+
 export function canViewTask(actor: User, task: Task, workflow: TaskWorkflow | undefined, users: User[], scopes: UserScope[], members: TeamMember[] = []): boolean {
   if (!inWorkspace(actor, members)) return false;
   if (actor.Access_Role !== "Admin" && task.Team_ID && !onTeam(members, actor.User_ID, task.Team_ID)) return false;
   if (actor.Access_Role === "Admin") return true;
+  if (actor.Access_Role === "Manager" && task.Team_ID && onTeam(members, actor.User_ID, task.Team_ID)) return true;
   if (task.Assigned_To === actor.User_ID || task.Assigned_By === actor.User_ID) return true;
+  if (taskCcIds(task).includes(actor.User_ID)) return true;
   if (effectiveReviewer(task, workflow) === actor.User_ID) return true;
-  if (actor.Access_Role === "Manager" || actor.Access_Role === "Coordinator") {
+  if (actor.Access_Role === "Coordinator") {
     return scopedUserIds(actor, users, scopes).has(task.Assigned_To);
   }
   return false;
@@ -111,12 +117,12 @@ export function canWorkTask(actor: User, task: Task, users: User[], scopes: User
   return false;
 }
 
-export function canReview(actor: User, task: Task, workflow: TaskWorkflow | undefined, users: User[], scopes: UserScope[], members: TeamMember[] = []): boolean {
+export function canReview(actor: User, task: Task, _workflow: TaskWorkflow | undefined, _users: User[], _scopes: UserScope[], members: TeamMember[] = []): boolean {
   if (!inWorkspace(actor, members)) return false;
   if (actor.Access_Role !== "Admin" && task.Team_ID && !onTeam(members, actor.User_ID, task.Team_ID)) return false;
   if (actor.Access_Role === "Admin") return true;
-  if (effectiveReviewer(task, workflow) === actor.User_ID) return true;
-  if (actor.Access_Role === "Manager" && scopedUserIds(actor, users, scopes).has(task.Assigned_To)) return true;
+  if (task.Assigned_By === actor.User_ID) return true;
+  if (actor.Access_Role === "Manager" && taskCcIds(task).includes(actor.User_ID)) return true;
   return false;
 }
 

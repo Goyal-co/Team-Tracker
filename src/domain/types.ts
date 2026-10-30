@@ -105,6 +105,7 @@ export interface Task {
   Key: string;
   Severity: Severity | "";
   Labels: string;
+  CC_User_Ids: string;
 }
 
 export interface TaskWorkflow {
@@ -237,10 +238,12 @@ export interface SystemInfo {
   calendarOAuthReady: boolean;
   dataStore: "file" | "postgres";
   bootstrapConfigured: boolean;
+  pushReady: boolean;
 }
 
 export interface Bootstrap extends SystemInfo {
   access: "workspace" | "waiting";
+  dbVersion: string;
   me: User;
   users: User[];
   teams: Team[];

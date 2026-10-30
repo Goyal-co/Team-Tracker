@@ -21,6 +21,7 @@ import {
   createProject,
   createTask,
   createTeam,
+  deleteTeam,
   postDirectMessage,
   postWorkspaceMessage,
   ensureAccount,
@@ -28,10 +29,12 @@ import {
   markNotifications,
   placeholderAttendees,
   renameSelf,
+  renameTeam,
   respondInvite,
   respondMeeting,
   revokeInvite,
   saveUser,
+  setPushDispatch,
   slotsFor,
   syncMeeting,
   transitionTask,
@@ -43,6 +46,8 @@ import {
 import type { AppConfig } from "./config";
 import { systemInfo } from "./config";
 import { HttpError } from "./errors";
+import type { VersionStore } from "./postgres";
+import { loadPushConfig, sendPushToUser, type PushStore } from "./push";
 import { deleteStored, readStored, storeBytes } from "./storage";
 import {
   calendarAuthUrl,
@@ -117,13 +122,23 @@ export interface AppDeps {
   sessions: SessionStore;
   tokens: TokenStore;
   uploadDir: string;
+  versions: VersionStore;
+  pushStore?: PushStore;
   lock?: <T>(fn: () => Promise<T>) => Promise<T>;
   allow?: (key: string, bucket: "auth" | "api") => Promise<boolean> | boolean;
 }
 
 export function createApp(deps: AppDeps) {
-  const { config, store, sessions, tokens, uploadDir } = deps;
+  const { config, store, sessions, tokens, uploadDir, versions, pushStore } = deps;
   fs.mkdirSync(uploadDir, { recursive: true });
+  const pushConfig = loadPushConfig();
+  setPushDispatch(
+    pushStore
+      ? (recipientId, title, body, entityType, entityId) => {
+          void sendPushToUser(pushStore, pushConfig, recipientId, title, body, entityType, entityId);
+        }
+      : null,
+  );
 
   async function storedFile(input: { File_Name: string; Mime_Type: string; Content_Base64: string }, folder: string) {
     if (!input.Content_Base64) return undefined;
@@ -304,23 +319,39 @@ export function createApp(deps: AppDeps) {
       res.json({ ok: true });
     }),
   );
+  async function snapshotFor(user: User, db: BusinessDb, dbVersion: string) {
+    const google = await tokens.get(user.User_ID);
+    return {
+      ...visibleData(db, user),
+      ...systemInfo(config, store.kind),
+      dbVersion,
+      me: user,
+      calendarConnected: Boolean(google?.refreshToken && (!google.scopes || calendarScopesGranted(google.scopes))),
+    };
+  }
+
   app.get(
     "/api/bootstrap",
     authed(async (req, res) => {
-      const result = await mutate(async (db) => {
+      await mutate(async (db) => {
         ensureDerivedNotifications(db, req.user.User_ID);
-        const google = await tokens.get(req.user.User_ID);
-        return {
-          db,
-          result: {
-            ...visibleData(db, req.user),
-            ...systemInfo(config, store.kind),
-            me: req.user,
-            calendarConnected: Boolean(google?.refreshToken && (!google.scopes || calendarScopesGranted(google.scopes))),
-          },
-        };
+        return { db, result: null };
       });
-      res.json(result);
+      const dbVersion = await versions.get();
+      res.json(await readDb((db) => snapshotFor(req.user, db, dbVersion)));
+    }),
+  );
+
+  app.get(
+    "/api/sync",
+    authed(async (req, res) => {
+      const clientVersion = String(req.query.v || "");
+      const current = await versions.get();
+      if (clientVersion && clientVersion === current) {
+        res.json({ unchanged: true, dbVersion: current });
+        return;
+      }
+      res.json(await readDb((db) => snapshotFor(req.user, db, current)));
     }),
   );
 
@@ -642,6 +673,52 @@ export function createApp(deps: AppDeps) {
       const input = teamSchema.parse(req.body);
       const team = await mutate((db) => ({ db, result: createTeam(db, req.user, input) }));
       res.status(201).json({ team });
+    }),
+  );
+  app.patch(
+    "/api/teams/:id",
+    authed(async (req, res) => {
+      const input = teamSchema.pick({ Name: true }).parse(req.body);
+      const team = await mutate((db) => ({ db, result: renameTeam(db, req.user, req.params.id, input.Name) }));
+      res.json({ team });
+    }),
+  );
+  app.delete(
+    "/api/teams/:id",
+    authed(async (req, res) => {
+      const outcome = await mutate((db) => ({ db, result: deleteTeam(db, req.user, req.params.id) }));
+      for (const ref of outcome.storageRefs) {
+        await deleteStored(ref, uploadDir).catch(() => undefined);
+      }
+      res.json({ ok: true, teamId: outcome.teamId });
+    }),
+  );
+  app.get(
+    "/api/push/vapid-public-key",
+    authed(async (_req, res) => {
+      res.json({ publicKey: config.vapidPublicKey || "", ready: Boolean(config.vapidPublicKey && config.vapidPrivateKey) });
+    }),
+  );
+  app.post(
+    "/api/push/subscribe",
+    authed(async (req, res) => {
+      if (!pushStore || !config.vapidPublicKey || !config.vapidPrivateKey) throw new HttpError(503, "Push notifications are not configured on the server.");
+      const endpoint = String(req.body?.endpoint || "");
+      const p256dh = String(req.body?.keys?.p256dh || "");
+      const auth = String(req.body?.keys?.auth || "");
+      if (!endpoint || !p256dh || !auth) throw new HttpError(400, "Invalid push subscription.");
+      await pushStore.save(req.user.User_ID, { endpoint, keys: { p256dh, auth } });
+      res.status(201).json({ ok: true });
+    }),
+  );
+  app.delete(
+    "/api/push/subscribe",
+    authed(async (req, res) => {
+      if (!pushStore) throw new HttpError(503, "Push notifications are not configured on the server.");
+      const endpoint = String(req.body?.endpoint || "");
+      if (endpoint) await pushStore.remove(endpoint, req.user.User_ID);
+      else await pushStore.removeAllForUser(req.user.User_ID);
+      res.json({ ok: true });
     }),
   );
   app.post(

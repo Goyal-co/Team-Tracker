@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from "react-router-dom";
 import { Bell, CalendarDays, CircleHelp, Download, History, LayoutDashboard, ListChecks, LogOut, Menu, MessageSquare, PanelLeft, Plus, Search, Settings, Users, X } from "lucide-react";
 import { formatLongDate } from "../domain/dates";
+import { chatUnreadNotes, tasksNeedingMyReview } from "../domain/inbox";
 import { canCreateTasks } from "../domain/permissions";
 import { cn } from "../lib";
 import { useWorkspace } from "../state";
@@ -21,7 +22,7 @@ const NAV = [
 ];
 
 export function Shell() {
-  const { data, signOut, markRead, respondInvite } = useWorkspace();
+  const { data, signOut, markRead, respondInvite, enablePush } = useWorkspace();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -40,7 +41,11 @@ export function Shell() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPrompt | null>(null);
   const [installHelp, setInstallHelp] = useState(false);
   const [standalone, setStandalone] = useState(false);
+  const [pushPrompt, setPushPrompt] = useState<"hidden" | "ask" | "blocked">("hidden");
+  const [pushBusy, setPushBusy] = useState(false);
   const unread = data.notifications.filter((item) => !item.Read_At).length;
+  const chatUnread = chatUnreadNotes(data.notifications).length;
+  const reviewCount = useMemo(() => tasksNeedingMyReview(data).length, [data]);
   const myInvites = data.invites.filter((invite) => invite.Status === "Pending" && invite.Email.toLowerCase() === data.me.Email.toLowerCase());
 
   useEffect(() => {
@@ -52,6 +57,56 @@ export function Shell() {
     window.addEventListener("beforeinstallprompt", onPrompt);
     return () => window.removeEventListener("beforeinstallprompt", onPrompt);
   }, []);
+
+  useEffect(() => {
+    if (!data.pushReady || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushPrompt("hidden");
+      return;
+    }
+    if (window.localStorage.getItem("goyal-push-prompt") === "dismissed" && Notification.permission !== "denied") {
+      setPushPrompt("hidden");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      if (Notification.permission === "denied") {
+        if (!cancelled) setPushPrompt("blocked");
+        return;
+      }
+      const registration = await navigator.serviceWorker.ready.catch(() => null);
+      const subscription = registration ? await registration.pushManager.getSubscription().catch(() => null) : null;
+      if (cancelled) return;
+      if (subscription && Notification.permission === "granted") {
+        setPushPrompt("hidden");
+        return;
+      }
+      setPushPrompt("ask");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.pushReady]);
+
+  async function allowPushAlerts() {
+    setPushBusy(true);
+    try {
+      const ok = await enablePush();
+      if (ok) {
+        setPushPrompt("hidden");
+        window.localStorage.setItem("goyal-push", "on");
+        toast("Phone and laptop alerts are on.");
+      } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
+        setPushPrompt("blocked");
+        toast("Alerts are blocked in the browser. Allow notifications for this site.", "error");
+      } else {
+        toast("Permission was not granted. You can try again from Settings.", "error");
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not turn on alerts.", "error");
+    } finally {
+      setPushBusy(false);
+    }
+  }
 
   async function installApp() {
     if (!installEvent) {
@@ -126,12 +181,24 @@ export function Shell() {
           )}
         </div>
         <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2" aria-label="Primary">
-          {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} title={item.label} className={({ isActive }) => cn(navItem, isActive ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
-              <item.icon size={18} className="shrink-0" />
-              {showLabels && <span className="truncate">{item.label}</span>}
-            </NavLink>
-          ))}
+          {NAV.map((item) => {
+            const badge = item.to === "/chat" ? chatUnread : (item.to === "/" || item.to === "/my-tasks") ? reviewCount : 0;
+            const badgeTone = item.to === "/chat" ? "bg-red-600 text-white" : "bg-accent text-white";
+            return (
+              <NavLink key={item.to} to={item.to} end={item.end} title={item.label} className={({ isActive }) => cn(navItem, "relative", isActive ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
+                <span className="relative shrink-0">
+                  <item.icon size={18} />
+                  {badge > 0 && !showLabels && (
+                    <span className={cn("absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-0.5 text-[9px] font-semibold leading-none", badgeTone)}>{badge > 9 ? "9+" : badge}</span>
+                  )}
+                </span>
+                {showLabels && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
+                {badge > 0 && showLabels && (
+                  <span className={cn("ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none", badgeTone)}>{badge > 9 ? "9+" : badge}</span>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line px-2 py-2">
           <NavLink to="/settings" title="Settings" className={({ isActive }) => cn(navItem, isActive ? "bg-accent-soft text-accent" : "text-muted hover:bg-slate-50 hover:text-ink")}>
@@ -227,17 +294,52 @@ export function Shell() {
             })}
           </div>
         )}
+        {pushPrompt === "ask" && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-accent-soft px-3 py-2 text-[13px] md:px-5">
+            <Bell size={16} className="shrink-0 text-accent" />
+            <span className="min-w-0 flex-1 font-medium">Allow alerts on this laptop or phone so you get task, chat, and meeting updates even when the app is closed.</span>
+            <Button type="button" className="h-7 px-2" disabled={pushBusy} onClick={() => void allowPushAlerts()}>{pushBusy ? "Allowing…" : "Allow alerts"}</Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-7 px-2"
+              onClick={() => {
+                window.localStorage.setItem("goyal-push-prompt", "dismissed");
+                setPushPrompt("hidden");
+              }}
+            >
+              Not now
+            </Button>
+          </div>
+        )}
+        {pushPrompt === "blocked" && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-amber-50 px-3 py-2 text-[13px] text-amber-950 md:px-5">
+            <Bell size={16} className="shrink-0" />
+            <span className="min-w-0 flex-1">Alerts are blocked for this site. Open your browser site settings and allow notifications, then turn them on under Settings.</span>
+            <Button type="button" variant="secondary" className="h-7 px-2" onClick={() => navigate("/settings")}>Open Settings</Button>
+            <Button type="button" variant="ghost" className="h-7 px-2" onClick={() => setPushPrompt("hidden")}>Dismiss</Button>
+          </div>
+        )}
         <main id="content" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", location.pathname === "/chat" ? "overflow-hidden pb-16 md:pb-0" : "overflow-auto px-3 py-4 pb-24 md:px-4 md:pb-4")}>
           <Outlet context={{ openTask: setTaskId, openCreateTask: (teamId?: string) => setCreateTask(typeof teamId === "string" ? teamId : ""), openCreateMeeting: (date?: string, attendeeIds?: string[]) => setCreateMeeting({ date, attendeeIds }), openMeeting: setMeetingId }} />
         </main>
       </div>
       <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-line bg-white pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Mobile">
-        {NAV.filter((item) => item.to !== "/activity" && item.to !== "/calendar").map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => cn("flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px]", isActive ? "font-medium text-accent" : "text-muted")}>
-            <item.icon size={18} />
-            <span className="truncate">{item.label}</span>
-          </NavLink>
-        ))}
+        {NAV.filter((item) => item.to !== "/activity").map((item) => {
+          const badge = item.to === "/chat" ? chatUnread : (item.to === "/" || item.to === "/my-tasks") ? reviewCount : 0;
+          const badgeTone = item.to === "/chat" ? "bg-red-600 text-white" : "bg-accent text-white";
+          return (
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => cn("relative flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px]", isActive ? "font-medium text-accent" : "text-muted")}>
+              <span className="relative">
+                <item.icon size={18} />
+                {badge > 0 && (
+                  <span className={cn("absolute -right-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-0.5 text-[9px] font-semibold leading-none", badgeTone)}>{badge > 9 ? "9+" : badge}</span>
+                )}
+              </span>
+              <span className="max-w-full truncate">{item.to === "/team" ? "Groups" : item.to === "/my-tasks" ? "My Work" : item.label}</span>
+            </NavLink>
+          );
+        })}
       </nav>
       {installHelp && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 p-4 sm:items-center" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallHelp(false); }}>

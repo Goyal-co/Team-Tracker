@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { addDays, formatDay, isOverdue, kolkataToday, startOfMonth, startOfWeek, weekdayIndex } from "../domain/dates";
+import { splitIds } from "../domain/ids";
+import { tasksNeedingMyReview } from "../domain/inbox";
 import { allowedTargets } from "../domain/workflow";
 import type { Task, TaskStatus } from "../domain/types";
 import { useWorkspace } from "../state";
@@ -11,6 +13,7 @@ import { TaskBoard } from "../components/task-board";
 import { Button, EmptyState, PageHeader, SelectInput } from "../components/ui";
 
 type Group = "Overdue" | "Today" | "Upcoming" | "Completed";
+type Scope = "assigned" | "created" | "cc" | "review" | "all";
 
 function groupOf(task: Task, today: string): Group {
   if (task.Status === "Completed") return "Completed";
@@ -19,15 +22,28 @@ function groupOf(task: Task, today: string): Group {
   return "Upcoming";
 }
 
+function matchesScope(task: Task, userId: string, scope: Scope) {
+  const onCc = splitIds(task.CC_User_Ids || "").includes(userId);
+  if (scope === "assigned") return task.Assigned_To === userId;
+  if (scope === "created") return task.Assigned_By === userId;
+  if (scope === "cc") return onCc;
+  if (scope === "review") return false;
+  return task.Assigned_To === userId || task.Assigned_By === userId || onCc;
+}
+
 export function MyTasksPage() {
   const { data, transitionTask } = useWorkspace();
   const shell = useShell();
   const toast = useToast();
   const [view, setView] = useState<"list" | "board" | "calendar">("board");
   const [group, setGroup] = useState<Group | "All">("All");
+  const [scope, setScope] = useState<Scope>("assigned");
   const [teamId, setTeamId] = useState("");
   const today = kolkataToday();
-  const mine = data.tasks.filter((task) => task.Assigned_To === data.me.User_ID && (!teamId || task.Team_ID === teamId));
+  const reviewQueue = tasksNeedingMyReview(data);
+  const mine = scope === "review"
+    ? reviewQueue.filter((task) => !teamId || task.Team_ID === teamId)
+    : data.tasks.filter((task) => matchesScope(task, data.me.User_ID, scope) && (!teamId || task.Team_ID === teamId));
   const names = useMemo(() => new Map(data.users.map((user) => [user.User_ID, user.Name])), [data.users]);
   const visible = mine.filter((task) => group === "All" || groupOf(task, today) === group);
 
@@ -44,7 +60,7 @@ export function MyTasksPage() {
     }
     try {
       await transitionTask(task.Task_ID, { Updated_At: task.Updated_At, to: next, reason: "" });
-      toast(next === "Under Review" ? "Submitted for review." : "Status updated.");
+      toast(next === "Under Review" ? "Submitted for review. The creator and managers on CC can approve it." : "Status updated.");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not update the task.", "error");
     }
@@ -52,14 +68,34 @@ export function MyTasksPage() {
 
   return (
     <div>
-      <PageHeader title="My work" subtitle="Everything assigned to you, in one place." actions={
+      <PageHeader title="My work" subtitle={scope === "review" ? "Work waiting for your approval." : "Work assigned to you, that you created, or where you are on CC."} actions={
         <div className="flex max-w-full overflow-x-auto rounded-[10px] border border-line bg-white p-0.5">
           {(["list", "board", "calendar"] as const).map((item) => (
             <button key={item} type="button" className={`h-8 shrink-0 rounded-lg px-3 text-[13px] capitalize ${view === item ? "bg-accent-soft font-medium text-accent" : "text-muted"}`} onClick={() => setView(item)}>{item}</button>
           ))}
         </div>
       } />
+      {reviewQueue.length > 0 && scope !== "review" && (
+        <button
+          type="button"
+          className="mb-3 flex w-full items-center justify-between gap-2 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-left"
+          onClick={() => { setScope("review"); setGroup("All"); setView("list"); }}
+        >
+          <span>
+            <span className="block text-[13px] font-semibold text-ink">Needs your review</span>
+            <span className="block text-[12px] text-muted">{reviewQueue.length} {reviewQueue.length === 1 ? "task is" : "tasks are"} waiting for approval</span>
+          </span>
+          <span className="rounded-full bg-accent px-2.5 py-1 text-[12px] font-semibold text-white">{reviewQueue.length}</span>
+        </button>
+      )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SelectInput value={scope} onChange={(event) => setScope(event.target.value as Scope)} className={filterControlClass}>
+          <option value="assigned">Assigned to me</option>
+          <option value="created">I created</option>
+          <option value="cc">I'm on CC</option>
+          <option value="review">To review{reviewQueue.length ? ` (${reviewQueue.length})` : ""}</option>
+          <option value="all">All involving me</option>
+        </SelectInput>
         <SelectInput value={teamId} onChange={(event) => setTeamId(event.target.value)} className={filterControlClass}>
           <option value="">All workspaces</option>
           {data.teams.filter((team) => team.Status === "Active").map((team) => <option key={team.Team_ID} value={team.Team_ID}>{team.Name}</option>)}
@@ -72,7 +108,7 @@ export function MyTasksPage() {
           </button>
         ))}
       </div>
-      {visible.length === 0 && <EmptyState title="Nothing in this view" body="Tasks assigned to you will show up here." />}
+      {visible.length === 0 && <EmptyState title="Nothing in this view" body={scope === "assigned" ? "Tasks assigned to you will show up here." : scope === "created" ? "Tasks you create will show up here." : scope === "cc" ? "Tasks where you are on CC will show up here." : scope === "review" ? "When someone submits work for your review, it will show up here." : "Work that involves you will show up here."} />}
       {view === "list" && visible.length > 0 && (
         <div className="space-y-2">
           {visible.map((task) => (
@@ -89,14 +125,27 @@ export function MyTasksPage() {
                   {task.Project && <span>{task.Project}</span>}
                 </span>
               </button>
-              <Button type="button" variant="secondary" onClick={() => void quick(task)}>
-                {task.Status === "To Do" ? "Start" : task.Status === "In Progress" ? (task.Type === "Bug" ? "Ready to verify" : "Submit for review") : task.Status === "Blocked" ? "Resume" : "Open"}
-              </Button>
+              {scope === "review" ? (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    void transitionTask(task.Task_ID, { Updated_At: task.Updated_At, to: "Completed", reason: "" })
+                      .then(() => toast("Task approved."))
+                      .catch((error: unknown) => toast(error instanceof Error ? error.message : "Could not approve that task.", "error"));
+                  }}
+                >
+                  Approve
+                </Button>
+              ) : (
+                <Button type="button" variant="secondary" onClick={() => void quick(task)}>
+                  {task.Status === "To Do" ? "Start" : task.Status === "In Progress" ? (task.Type === "Bug" ? "Ready to verify" : "Submit for review") : task.Status === "Blocked" ? "Resume" : "Open"}
+                </Button>
+              )}
             </article>
           ))}
         </div>
       )}
-      {view === "board" && (
+      {view === "board" && visible.length > 0 && (
         <TaskBoard
           tasks={visible}
           names={names}
@@ -106,7 +155,7 @@ export function MyTasksPage() {
             const reason = to === "Blocked" ? window.prompt("Why is this blocked?") ?? "" : "";
             if (to === "Blocked" && !reason.trim()) return;
             void transitionTask(task.Task_ID, { Updated_At: task.Updated_At, to, reason })
-              .then(() => toast(to === "Under Review" ? "Sent to the person who assigned it." : "Work moved."))
+              .then(() => toast(to === "Under Review" ? "Submitted for review." : to === "Completed" ? "Task approved." : "Work moved."))
               .catch((error: unknown) => toast(error instanceof Error ? error.message : "That move is not allowed.", "error"));
           }}
         />

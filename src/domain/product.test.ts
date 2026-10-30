@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addDays, isOverdue, kolkataMinutes, kolkataToIso, kolkataToday, startOfWeek } from "./dates";
 import { findSlots, interpretGoogleEntry, mergeAvailability } from "./availability";
-import { canAssignTo, canEditTaskMetadata, canViewTask, descendantIds } from "./permissions";
+import { canAssignTo, canEditTaskMetadata, canReview, canViewTask, descendantIds } from "./permissions";
 import { transitionAllowed } from "./workflow";
 import { databaseToSheets, sheetsToDatabase } from "./sheets";
 import { companyFixture } from "./fixture";
@@ -35,6 +35,25 @@ describe("permissions", () => {
     expect(canViewTask(user("U-002"), bug, undefined, db.users, db.scopes, db.members)).toBe(true);
     expect(canViewTask(user("U-004"), bug, undefined, db.users, db.scopes, db.members)).toBe(true);
     expect(canViewTask(user("U-005"), bug, undefined, db.users, db.scopes, db.members)).toBe(false);
+  });
+
+  it("lets a manager on the team see every task in that workspace", () => {
+    const dbLocal = companyFixture(NOW);
+    const manager = dbLocal.users.find((item) => item.User_ID === "U-004") as User;
+    manager.Access_Role = "Manager";
+    const other = { ...task("T-0001"), Assigned_To: "U-002", Assigned_By: "U-003" };
+    expect(canViewTask(manager, other, undefined, dbLocal.users, dbLocal.scopes, dbLocal.members)).toBe(true);
+  });
+
+  it("lets the creator and a manager on CC approve, but not an employee on CC", () => {
+    const dbLocal = companyFixture(NOW);
+    const employee = dbLocal.users.find((item) => item.User_ID === "U-003") as User;
+    const work = { ...task("T-0001"), Assigned_To: "U-002", Assigned_By: "U-002", CC_User_Ids: "U-003" };
+    const withManagerCc = { ...work, Assigned_By: "U-003", CC_User_Ids: "U-004" };
+    expect(canReview(user("U-003"), withManagerCc, undefined, dbLocal.users, dbLocal.scopes, dbLocal.members)).toBe(true);
+    expect(canReview(user("U-004"), withManagerCc, undefined, dbLocal.users, dbLocal.scopes, dbLocal.members)).toBe(true);
+    expect(canReview(employee, work, undefined, dbLocal.users, dbLocal.scopes, dbLocal.members)).toBe(false);
+    expect(canViewTask(employee, work, undefined, dbLocal.users, dbLocal.scopes, dbLocal.members)).toBe(true);
   });
 
   it("stops a reporting cycle", () => {

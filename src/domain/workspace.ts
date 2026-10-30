@@ -68,6 +68,7 @@ function normalize(raw: Partial<BusinessDb>): BusinessDb {
       Key: task.Key || task.Task_ID,
       Severity: task.Severity || "",
       Labels: task.Labels || "",
+      CC_User_Ids: task.CC_User_Ids || "",
     })),
     workflows: asArray(raw.workflows),
     comments: asArray(raw.comments),

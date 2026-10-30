@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { companyFixture } from "../src/domain/fixture";
 import type { User } from "../src/domain/types";
-import { addComment, addTeamMember, createInvite, createTask, createTeam, postDirectMessage, postWorkspaceMessage, renameSelf, transitionTask, visibleData } from "./actions";
+import { addComment, addTeamMember, createInvite, createTask, createTeam, deleteTeam, postDirectMessage, postWorkspaceMessage, renameSelf, renameTeam, transitionTask, updateTask, visibleData } from "./actions";
 
 const NOW = new Date("2026-10-21T06:30:00.000Z");
 
@@ -38,6 +38,33 @@ describe("workspace actions", () => {
     expect(createInvite(db, lee, { Email: "new.person@example.com", Team_ID: "TM-002", Access_Role: "Employee", Member_Role: "Member" }).Status).toBe("Pending");
     renameSelf(db, omar, "Omar North");
     expect(() => renameSelf(db, lee, "omar north")).toThrow(/already used/i);
+  });
+
+  it("lets an admin rename and permanently delete a group", () => {
+    const db = companyFixture(NOW);
+    const ada = db.users.find((user) => user.User_ID === "U-001") as User;
+    const mia = db.users.find((user) => user.User_ID === "U-003") as User;
+    expect(() => renameTeam(db, mia, "TM-001", "Renamed")).toThrow(/administrator/i);
+    expect(renameTeam(db, ada, "TM-001", "Platform Eng").Name).toBe("Platform Eng");
+    const deleted = deleteTeam(db, ada, "TM-001");
+    expect(deleted.teamId).toBe("TM-001");
+    expect(db.teams.some((team) => team.Team_ID === "TM-001")).toBe(false);
+    expect(db.tasks.some((task) => task.Team_ID === "TM-001")).toBe(false);
+    expect(db.projects.some((project) => project.Team_ID === "TM-001")).toBe(false);
+  });
+
+  it("notifies CC people and keeps Assigned_By as the creator after reassignment", () => {
+    const db = companyFixture(NOW);
+    const mia = db.users.find((user) => user.User_ID === "U-003") as User;
+    const lee = db.users.find((user) => user.User_ID === "U-002") as User;
+    const created = createTask(db, mia, { ...taskInput(), Assigned_To: "U-002", CC_User_Ids: ["U-004"] });
+    expect(created.Assigned_By).toBe("U-003");
+    expect(created.CC_User_Ids).toBe("U-004");
+    expect(db.notifications.some((item) => item.Recipient_ID === "U-004" && item.Title === "Added on CC")).toBe(true);
+    updateTask(db, lee, created.Task_ID, { Updated_At: created.Updated_At, Assigned_To: "U-003" });
+    const task = db.tasks.find((item) => item.Task_ID === created.Task_ID);
+    expect(task?.Assigned_By).toBe("U-003");
+    expect(task?.Assigned_To).toBe("U-003");
   });
 
   it("lets someone belong to another group and keeps a direct chat private", () => {

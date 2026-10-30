@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { formatDateTime, formatDay, formatTime, kolkataDayFromIso, kolkataToday } from "../domain/dates";
 import { splitIds } from "../domain/ids";
+import { unreadForPerson, unreadForTeam } from "../domain/inbox";
 import type { Meeting, User, WorkspaceMessage } from "../domain/types";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
@@ -10,7 +11,7 @@ import { Composer, MessageBody } from "../components/composer";
 import { Avatar, Button, TextInput } from "../components/ui";
 
 export function ChatPage() {
-  const { data, sendMessage, sendDirectMessage, availability, createTeam } = useWorkspace();
+  const { data, sendMessage, sendDirectMessage, availability, createTeam, markRead } = useWorkspace();
   const shell = useShell();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
@@ -53,6 +54,20 @@ export function ChatPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [thread.length, personId, groupId]);
+
+  const openUnreadIds = useMemo(() => {
+    const unread = personId
+      ? unreadForPerson(data.notifications, personId)
+      : groupId
+        ? unreadForTeam(data.notifications, groupId)
+        : [];
+    return unread.map((item) => item.Notification_ID).sort().join(",");
+  }, [personId, groupId, data.notifications]);
+
+  useEffect(() => {
+    if (!openUnreadIds) return;
+    void markRead(openUnreadIds.split(",")).catch(() => undefined);
+  }, [openUnreadIds]);
 
   useEffect(() => {
     if (!profileId) return;
@@ -108,32 +123,40 @@ export function ChatPage() {
           )}
           <ul>
             {groups.length === 0 && <li className="px-3 py-2 text-[13px] text-muted">No groups match.</li>}
-            {groups.map((team) => (
-              <li key={team.Team_ID}>
-                <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${groupId === team.Team_ID ? "bg-accent-soft" : ""}`} onClick={() => openGroup(team.Team_ID)}>
-                  <Avatar name={team.Name} size={32} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-medium">{team.Name}</span>
-                    <span className="block truncate text-[12px] text-muted">{memberOf.has(team.Team_ID) ? "You're in this group" : "Group chat"}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
+            {groups.map((team) => {
+              const unread = unreadForTeam(data.notifications, team.Team_ID).length;
+              return (
+                <li key={team.Team_ID}>
+                  <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${groupId === team.Team_ID ? "bg-accent-soft" : ""}`} onClick={() => openGroup(team.Team_ID)}>
+                    <Avatar name={team.Name} size={32} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium">{team.Name}</span>
+                      <span className="block truncate text-[12px] text-muted">{memberOf.has(team.Team_ID) ? "You're in this group" : "Group chat"}</span>
+                    </span>
+                    {unread > 0 && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white">{unread > 9 ? "9+" : unread}</span>}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
           <p className="px-3 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">{needle ? "Search" : "Chats"}</p>
           <ul>
             {people.length === 0 && <li className="px-3 py-2 text-[13px] text-muted">{needle ? "No one matches that search." : "Search for a person to start a direct chat."}</li>}
-            {people.map((user) => (
-              <li key={user.User_ID}>
-                <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${personId === user.User_ID ? "bg-accent-soft" : ""}`} onClick={() => openPerson(user.User_ID)}>
-                  <Avatar name={user.Name} size={32} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-medium">{user.Name}</span>
-                    <span className="block truncate text-[12px] text-muted">{preview(messages, me, user.User_ID) || user.Role || "Direct chat"}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
+            {people.map((user) => {
+              const unread = unreadForPerson(data.notifications, user.User_ID).length;
+              return (
+                <li key={user.User_ID}>
+                  <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${personId === user.User_ID ? "bg-accent-soft" : ""}`} onClick={() => openPerson(user.User_ID)}>
+                    <Avatar name={user.Name} size={32} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium">{user.Name}</span>
+                      <span className="block truncate text-[12px] text-muted">{preview(messages, me, user.User_ID) || user.Role || "Direct chat"}</span>
+                    </span>
+                    {unread > 0 && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white">{unread > 9 ? "9+" : unread}</span>}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </aside>

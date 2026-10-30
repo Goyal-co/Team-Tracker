@@ -1,4 +1,5 @@
 import { formatDay, isOverdue } from "../domain/dates";
+import { splitIds } from "../domain/ids";
 import type { Task, TaskStatus } from "../domain/types";
 import { TASK_STATUSES } from "../domain/types";
 import { PriorityBadge, STATUS_DOT } from "./badges";
@@ -42,6 +43,8 @@ export function TaskBoard({
               {column.map((task) => {
                 const late = isOverdue(task, today);
                 const assignee = names.get(task.Assigned_To) ?? "Unassigned";
+                const creator = names.get(task.Assigned_By) || "";
+                const ccCount = splitIds(task.CC_User_Ids || "").length;
                 return (
                   <article
                     key={task.Task_ID}
@@ -52,6 +55,9 @@ export function TaskBoard({
                     <button type="button" className="block w-full p-2.5 text-left" onClick={() => onOpen(task.Task_ID)}>
                       <span className="block text-[11px] font-semibold text-accent">{task.Key || task.Task_ID}</span>
                       <span className="mt-0.5 block text-[13px] font-medium leading-5">{task.Task_Title}</span>
+                      <span className="mt-1.5 block truncate text-[11px] text-muted">
+                        {assignee}{creator && creator !== assignee ? ` · from ${creator}` : ""}{ccCount ? ` · CC ${ccCount}` : ""}
+                      </span>
                       <span className="mt-2 flex items-center justify-between gap-2">
                         <PriorityBadge priority={task.Priority} />
                         <span className="flex items-center gap-1.5 text-[11px] text-muted">

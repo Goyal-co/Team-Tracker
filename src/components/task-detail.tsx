@@ -1,15 +1,16 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { activitySentence, commentParts, personName } from "../domain/format";
 import { dueLabel, formatDay, formatTime, isOverdue, kolkataToday } from "../domain/dates";
-import { canAssignTo, canEditTaskMetadata, canReview, effectiveReviewer } from "../domain/permissions";
+import { canAssignTo, canEditTaskMetadata, canReview, taskCcIds } from "../domain/permissions";
 import { allowedTargets } from "../domain/workflow";
 import { PRIORITIES, SEVERITIES, type Priority, type TaskStatus, type User } from "../domain/types";
+import { splitIds } from "../domain/ids";
 import { fileMime, fileToBase64 } from "../lib";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
 import { OverdueBadge, PriorityBadge, StatusBadge } from "./badges";
-import { EmployeeSelect } from "./employee-select";
+import { EmployeeMultiSelect, EmployeeSelect } from "./employee-select";
 import { activityKind } from "./activity-feed";
 import { Avatar, Button, Drawer, Field, OutsideClose, SelectInput, TextArea, TextInput } from "./ui";
 
@@ -19,6 +20,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
   const task = data.tasks.find((item) => item.Task_ID === taskId);
   const workflow = data.workflows.find((item) => item.Task_ID === taskId);
   const [draft, setDraft] = useState(task);
+  const [dirty, setDirty] = useState(false);
   const [reason, setReason] = useState("");
   const [ask, setAsk] = useState<"block" | "return" | null>(null);
   const [note, setNote] = useState("");
@@ -28,11 +30,25 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
   const [busy, setBusy] = useState(false);
   const today = kolkataToday();
   const names = useMemo(() => new Map(data.users.map((user) => [user.User_ID, user.Name])), [data.users]);
+
+  useEffect(() => {
+    setDirty(false);
+    setDraft(task);
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!task) return;
+    if (!dirty) setDraft(task);
+  }, [task?.Updated_At, task?.Status, task?.Assigned_To, task?.CC_User_Ids, dirty, task]);
+
   if (!task || !draft) return null;
   const record = task;
   const fields = draft;
   const editable = canEditTaskMetadata(data.me, task, data.users, data.scopes, data.members);
   const canReassign = canAssignTo(data.me, task.Assigned_To, data.users, data.scopes, data.members, task.Team_ID);
+  const canEditCc = editable || task.Assigned_By === data.me.User_ID || data.me.Access_Role === "Admin";
+  const teamPeople = data.users.filter((user) => user.Status === "Active" && data.members.some((member) => member.Team_ID === task.Team_ID && member.User_ID === user.User_ID && member.Status === "Active"));
+  const ccIds = splitIds(draft.CC_User_Ids || "");
   const targets = allowedTargets({ actor: data.me, task, workflow, users: data.users, scopes: data.scopes, members: data.members });
   const reviewer = canReview(data.me, task, workflow, data.users, data.scopes, data.members);
   const overdue = isOverdue(task, today);
@@ -76,24 +92,29 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
   }
 
   async function save() {
-    if (!editable) return;
+    if (!editable && !canEditCc) return;
     setBusy(true);
     try {
       await updateTask(record.Task_ID, {
         Updated_At: record.Updated_At,
-        Task_Title: fields.Task_Title,
-        Description: fields.Description,
-        Assigned_To: fields.Assigned_To,
-        Priority: fields.Priority,
-        Start_Date: fields.Start_Date,
-        Due_Date: fields.Due_Date,
-        Project: fields.Project,
-        Department: fields.Department,
-        Remarks: fields.Remarks,
-        Labels: fields.Labels,
-        Severity: fields.Severity,
+        ...(editable
+          ? {
+              Task_Title: fields.Task_Title,
+              Description: fields.Description,
+              Assigned_To: fields.Assigned_To,
+              Priority: fields.Priority,
+              Start_Date: fields.Start_Date,
+              Due_Date: fields.Due_Date,
+              Department: fields.Department,
+              Remarks: fields.Remarks,
+              Labels: fields.Labels,
+              Severity: fields.Severity,
+            }
+          : {}),
+        CC_User_Ids: splitIds(fields.CC_User_Ids || ""),
       });
-      toast("Task saved.");
+      setDirty(false);
+      toast(editable ? "Task saved." : "CC updated.");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not save the task.", "error");
     } finally {
@@ -105,7 +126,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
     setBusy(true);
     try {
       await transitionTask(record.Task_ID, { Updated_At: record.Updated_At, to, reason: because });
-      toast(to === "Completed" ? "Task approved." : to === "Under Review" ? "Submitted for review." : "Status updated.");
+      toast(to === "Completed" ? "Task approved." : to === "Under Review" ? "Submitted for review. The creator and managers on CC can approve it." : "Status updated.");
       setAsk(null);
       setReason("");
     } catch (error) {
@@ -155,10 +176,10 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
           <section className="space-y-3 rounded-lg border border-line p-3">
             <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted">Description</h3>
             <Field label="Title">
-              <TextInput value={draft.Task_Title} disabled={!editable} onChange={(event) => setDraft({ ...draft, Task_Title: event.target.value })} />
+              <TextInput value={draft.Task_Title} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Task_Title: event.target.value }); }} />
             </Field>
             <Field label="Details">
-              <TextArea value={draft.Description} disabled={!editable} onChange={(event) => setDraft({ ...draft, Description: event.target.value })} />
+              <TextArea value={draft.Description} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Description: event.target.value }); }} />
             </Field>
           </section>
           <section className="space-y-3 rounded-lg border border-line p-3">
@@ -166,21 +187,33 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
           <div className="grid grid-cols-2 gap-3">
             <Field label="Owner">
               {editable || canReassign ? (
-                <EmployeeSelect users={data.users.filter((user) => user.Status === "Active" && data.members.some((member) => member.Team_ID === task.Team_ID && member.User_ID === user.User_ID && member.Status === "Active"))} value={draft.Assigned_To} onChange={(id) => {
+                <EmployeeSelect users={teamPeople} value={draft.Assigned_To} onChange={(id) => {
                   const person = data.users.find((user) => user.User_ID === id);
                   if (!editable) {
                     void updateTask(record.Task_ID, { Updated_At: record.Updated_At, Assigned_To: id }).then(() => toast("Work reassigned.")).catch((error: Error) => toast(error.message, "error"));
                     return;
                   }
-                  setDraft({ ...draft, Assigned_To: id, Department: person?.Department ?? draft.Department });
+                  setDirty(true);
+                  setDraft({ ...draft, Assigned_To: id, Department: person?.Department ?? draft.Department, CC_User_Ids: splitIds(draft.CC_User_Ids || "").filter((item) => item !== id).join(",") });
                 }} />
               ) : <p className="text-[13px]">{names.get(task.Assigned_To)}</p>}
             </Field>
-            <Field label="Reviewed by">
-              <p className="text-[13px]">{names.get(effectiveReviewer(task, workflow)) || "The person who last assigned this"}</p>
+            <Field label="Created by">
+              <p className="text-[13px]">{names.get(task.Assigned_By) || "—"}</p>
+            </Field>
+            <Field label="CC" hint="Managers or admins on CC can approve. Employees on CC can follow only.">
+              {canEditCc ? (
+                <EmployeeMultiSelect
+                  users={teamPeople.filter((user) => user.User_ID !== draft.Assigned_To)}
+                  value={ccIds}
+                  onChange={(ids) => { setDirty(true); setDraft({ ...draft, CC_User_Ids: ids.join(",") }); }}
+                />
+              ) : (
+                <p className="text-[13px]">{taskCcIds(task).map((id) => names.get(id) || id).join(", ") || "Nobody"}</p>
+              )}
             </Field>
             <Field label="Priority">
-              <SelectInput value={draft.Priority} disabled={!editable} onChange={(event) => setDraft({ ...draft, Priority: event.target.value as Priority })}>
+              <SelectInput value={draft.Priority} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Priority: event.target.value as Priority }); }}>
                 {PRIORITIES.map((item) => <option key={item}>{item}</option>)}
               </SelectInput>
             </Field>
@@ -192,24 +225,24 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
             </Field>
             {task.Type === "Bug" && (
               <Field label="Severity">
-                <SelectInput value={draft.Severity} disabled={!editable} onChange={(event) => setDraft({ ...draft, Severity: event.target.value as typeof draft.Severity })}>
+                <SelectInput value={draft.Severity} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Severity: event.target.value as typeof draft.Severity }); }}>
                   {SEVERITIES.map((item) => <option key={item}>{item}</option>)}
                 </SelectInput>
               </Field>
             )}
             <Field label="Labels">
-              <TextInput value={draft.Labels} disabled={!editable} onChange={(event) => setDraft({ ...draft, Labels: event.target.value })} placeholder="login, release" />
+              <TextInput value={draft.Labels} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Labels: event.target.value }); }} placeholder="login, release" />
             </Field>
             <Field label="Start">
-              <TextInput type="date" value={draft.Start_Date} disabled={!editable} onChange={(event) => setDraft({ ...draft, Start_Date: event.target.value })} />
+              <TextInput type="date" value={draft.Start_Date} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Start_Date: event.target.value }); }} />
             </Field>
             <Field label="Due">
-              <TextInput type="date" value={draft.Due_Date} disabled={!editable} onChange={(event) => setDraft({ ...draft, Due_Date: event.target.value })} />
+              <TextInput type="date" value={draft.Due_Date} disabled={!editable} onChange={(event) => { setDirty(true); setDraft({ ...draft, Due_Date: event.target.value }); }} />
               <span className={due.overdue && task.Status !== "Completed" ? "mt-1 block text-[12px] text-red-700" : "mt-1 block text-[12px] text-muted"}>{formatDay(task.Due_Date)}</span>
             </Field>
           </div>
           <Field label="Remarks">
-            <TextArea value={draft.Remarks} disabled={!editable} className="min-h-16" onChange={(event) => setDraft({ ...draft, Remarks: event.target.value })} />
+            <TextArea value={draft.Remarks} disabled={!editable} className="min-h-16" onChange={(event) => { setDirty(true); setDraft({ ...draft, Remarks: event.target.value }); }} />
           </Field>
           </section>
           {task.Status === "Blocked" && workflow?.Blocked_Reason && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-800">Blocked: {workflow.Blocked_Reason}</p>}
@@ -221,7 +254,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
             {targets.includes("Blocked") && <Button type="button" variant="secondary" disabled={busy} onClick={() => setAsk("block")}>Mark blocked</Button>}
             {task.Status === "Under Review" && reviewer && targets.includes("Completed") && <Button type="button" disabled={busy} onClick={() => void move("Completed")}>Approve</Button>}
             {task.Status === "Under Review" && reviewer && targets.includes("In Progress") && <Button type="button" variant="secondary" disabled={busy} onClick={() => setAsk("return")}>Return</Button>}
-            {editable && <Button type="button" variant="secondary" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save changes"}</Button>}
+            {(editable || canEditCc) && <Button type="button" variant="secondary" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save changes"}</Button>}
           </div>
           {ask && (
             <div className="rounded-xl border border-line p-3">

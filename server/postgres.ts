@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS workspace.tasks (
   project_id text NOT NULL,
   key text NOT NULL,
   severity text NOT NULL,
-  labels text NOT NULL
+  labels text NOT NULL,
+  cc_user_ids text NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS workspace.task_workflows (
   position integer NOT NULL,
@@ -238,6 +239,15 @@ CREATE TABLE IF NOT EXISTS workspace.locks (
   token text NOT NULL,
   expires_at timestamptz NOT NULL
 );
+ALTER TABLE workspace.tasks ADD COLUMN IF NOT EXISTS cc_user_ids text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS workspace.push_subscriptions (
+  endpoint text PRIMARY KEY,
+  user_id text NOT NULL,
+  p256dh text NOT NULL,
+  auth text NOT NULL,
+  created_at text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON workspace.push_subscriptions (user_id);
 `;
 
 export interface VersionStore {
@@ -446,7 +456,7 @@ async function saveWorkspace(pool: Pool, db: BusinessDb) {
     await insert(client, "team_members", ["team_id", "user_id", "member_role", "status", "joined_at"], db.members.map((row) => [row.Team_ID, row.User_ID, row.Member_Role, row.Status, row.Joined_At]));
     await insert(client, "projects", ["project_id", "team_id", "name", "key", "next_number", "status"], db.projects.map((row) => [row.Project_ID, row.Team_ID, row.Name, row.Key, row.Next_Number, row.Status]));
     await insert(client, "invites", ["invite_id", "email", "team_id", "access_role", "member_role", "invited_by", "status", "created_at", "responded_at"], db.invites.map((row) => [row.Invite_ID, row.Email, row.Team_ID, row.Access_Role, row.Member_Role, row.Invited_By, row.Status, row.Created_At, row.Responded_At]));
-    await insert(client, "tasks", ["task_id", "task_title", "description", "assigned_to", "assigned_by", "priority", "status", "start_date", "due_date", "created_at", "updated_at", "completed_at", "remarks", "project", "department", "type", "team_id", "project_id", "key", "severity", "labels"], db.tasks.map((row) => [row.Task_ID, row.Task_Title, row.Description, row.Assigned_To, row.Assigned_By, row.Priority, row.Status, row.Start_Date, row.Due_Date, row.Created_At, row.Updated_At, row.Completed_At, row.Remarks, row.Project, row.Department, row.Type, row.Team_ID, row.Project_ID, row.Key, row.Severity, row.Labels]));
+    await insert(client, "tasks", ["task_id", "task_title", "description", "assigned_to", "assigned_by", "priority", "status", "start_date", "due_date", "created_at", "updated_at", "completed_at", "remarks", "project", "department", "type", "team_id", "project_id", "key", "severity", "labels", "cc_user_ids"], db.tasks.map((row) => [row.Task_ID, row.Task_Title, row.Description, row.Assigned_To, row.Assigned_By, row.Priority, row.Status, row.Start_Date, row.Due_Date, row.Created_At, row.Updated_At, row.Completed_At, row.Remarks, row.Project, row.Department, row.Type, row.Team_ID, row.Project_ID, row.Key, row.Severity, row.Labels, row.CC_User_Ids || ""]));
     await insert(client, "task_workflows", ["task_id", "reviewer_id", "blocked_reason", "review_note"], db.workflows.map((row) => [row.Task_ID, row.Reviewer_ID, row.Blocked_Reason, row.Review_Note]));
     await insert(client, "comments", ["comment_id", "task_id", "author_id", "body", "created_at"], db.comments.map((row) => [row.Comment_ID, row.Task_ID, row.Author_ID, row.Body, row.Created_At]));
     await insert(client, "attachments", ["attachment_id", "task_id", "file_name", "mime_type", "size_bytes", "uploaded_by", "uploaded_at", "storage_ref"], db.attachments.map((row) => [row.Attachment_ID, row.Task_ID, row.File_Name, row.Mime_Type, row.Size_Bytes, row.Uploaded_By, row.Uploaded_At, row.Storage_Ref]));
@@ -484,7 +494,7 @@ interface TeamRow { team_id: string; name: string; description: string; status: 
 interface MemberRow { team_id: string; user_id: string; member_role: TeamMember["Member_Role"]; status: TeamMember["Status"]; joined_at: string }
 interface ProjectRow { project_id: string; team_id: string; name: string; key: string; next_number: number; status: Project["Status"] }
 interface InviteRow { invite_id: string; email: string; team_id: string; access_role: Invite["Access_Role"]; member_role: Invite["Member_Role"]; invited_by: string; status: Invite["Status"]; created_at: string; responded_at: string }
-interface TaskRow { task_id: string; task_title: string; description: string; assigned_to: string; assigned_by: string; priority: Task["Priority"]; status: Task["Status"]; start_date: string; due_date: string; created_at: string; updated_at: string; completed_at: string; remarks: string; project: string; department: string; type: Task["Type"]; team_id: string; project_id: string; key: string; severity: Task["Severity"]; labels: string }
+interface TaskRow { task_id: string; task_title: string; description: string; assigned_to: string; assigned_by: string; priority: Task["Priority"]; status: Task["Status"]; start_date: string; due_date: string; created_at: string; updated_at: string; completed_at: string; remarks: string; project: string; department: string; type: Task["Type"]; team_id: string; project_id: string; key: string; severity: Task["Severity"]; labels: string; cc_user_ids?: string }
 interface WorkflowRow { task_id: string; reviewer_id: string; blocked_reason: string; review_note: string }
 interface CommentRow { comment_id: string; task_id: string; author_id: string; body: string; created_at: string }
 interface AttachmentRow { attachment_id: string; task_id: string; file_name: string; mime_type: string; size_bytes: number; uploaded_by: string; uploaded_at: string; storage_ref: string }
@@ -502,7 +512,7 @@ function teamFrom(row: TeamRow): Team { return { Team_ID: row.team_id, Name: row
 function memberFrom(row: MemberRow): TeamMember { return { Team_ID: row.team_id, User_ID: row.user_id, Member_Role: row.member_role, Status: row.status, Joined_At: row.joined_at }; }
 function projectFrom(row: ProjectRow): Project { return { Project_ID: row.project_id, Team_ID: row.team_id, Name: row.name, Key: row.key, Next_Number: Number(row.next_number), Status: row.status }; }
 function inviteFrom(row: InviteRow): Invite { return { Invite_ID: row.invite_id, Email: row.email, Team_ID: row.team_id, Access_Role: row.access_role, Member_Role: row.member_role, Invited_By: row.invited_by, Status: row.status, Created_At: row.created_at, Responded_At: row.responded_at }; }
-function taskFrom(row: TaskRow): Task { return { Task_ID: row.task_id, Task_Title: row.task_title, Description: row.description, Assigned_To: row.assigned_to, Assigned_By: row.assigned_by, Priority: row.priority, Status: row.status, Start_Date: row.start_date, Due_Date: row.due_date, Created_At: row.created_at, Updated_At: row.updated_at, Completed_At: row.completed_at, Remarks: row.remarks, Project: row.project, Department: row.department, Type: row.type, Team_ID: row.team_id, Project_ID: row.project_id, Key: row.key, Severity: row.severity, Labels: row.labels }; }
+function taskFrom(row: TaskRow): Task { return { Task_ID: row.task_id, Task_Title: row.task_title, Description: row.description, Assigned_To: row.assigned_to, Assigned_By: row.assigned_by, Priority: row.priority, Status: row.status, Start_Date: row.start_date, Due_Date: row.due_date, Created_At: row.created_at, Updated_At: row.updated_at, Completed_At: row.completed_at, Remarks: row.remarks, Project: row.project, Department: row.department, Type: row.type, Team_ID: row.team_id, Project_ID: row.project_id, Key: row.key, Severity: row.severity, Labels: row.labels, CC_User_Ids: row.cc_user_ids || "" }; }
 function workflowFrom(row: WorkflowRow): TaskWorkflow { return { Task_ID: row.task_id, Reviewer_ID: row.reviewer_id, Blocked_Reason: row.blocked_reason, Review_Note: row.review_note }; }
 function commentFrom(row: CommentRow): Comment { return { Comment_ID: row.comment_id, Task_ID: row.task_id, Author_ID: row.author_id, Body: row.body, Created_At: row.created_at }; }
 function attachmentFrom(row: AttachmentRow): Attachment { return { Attachment_ID: row.attachment_id, Task_ID: row.task_id, File_Name: row.file_name, Mime_Type: row.mime_type, Size_Bytes: Number(row.size_bytes), Uploaded_By: row.uploaded_by, Uploaded_At: row.uploaded_at, Storage_Ref: row.storage_ref }; }

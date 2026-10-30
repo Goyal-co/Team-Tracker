@@ -41,7 +41,7 @@ const HEADERS = {
   TEAM_MEMBERS: ["Team_ID", "User_ID", "Member_Role", "Status", "Joined_At"],
   PROJECTS: ["Project_ID", "Team_ID", "Name", "Key", "Next_Number", "Status"],
   INVITES: ["Invite_ID", "Email", "Team_ID", "Access_Role", "Member_Role", "Invited_By", "Status", "Created_At", "Responded_At"],
-  TASKS: ["Task_ID", "Task_Title", "Description", "Assigned_To", "Assigned_By", "Priority", "Status", "Start_Date", "Due_Date", "Created_At", "Updated_At", "Completed_At", "Remarks", "Project", "Department", "Type", "Team_ID", "Project_ID", "Key", "Severity", "Labels"],
+  TASKS: ["Task_ID", "Task_Title", "Description", "Assigned_To", "Assigned_By", "Priority", "Status", "Start_Date", "Due_Date", "Created_At", "Updated_At", "Completed_At", "Remarks", "Project", "Department", "Type", "Team_ID", "Project_ID", "Key", "Severity", "Labels", "CC_User_Ids"],
   MEETINGS: ["Meeting_ID", "Meeting_Title", "Description", "Organized_By", "Attendees", "Start_DateTime", "End_DateTime", "Location", "Google_Meet_Link", "Calendar_Event_ID", "Status", "Created_At", "Updated_At"],
   ACTIVITY_LOG: ["Log_ID", "Timestamp", "Actor_ID", "Action", "Entity_Type", "Entity_ID", "Old_Value", "New_Value"],
   SETTINGS: ["Key", "Value", "Description"],

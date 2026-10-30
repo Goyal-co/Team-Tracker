@@ -16,6 +16,9 @@ export interface AppConfig {
   dataDir: string;
   cookieSecure: boolean;
   trustProxy: boolean;
+  vapidPublicKey: string;
+  vapidPrivateKey: string;
+  vapidSubject: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -44,6 +47,9 @@ export function loadConfig(): AppConfig {
     dataDir: process.env.DATA_DIR || path.join(root, "data"),
     cookieSecure: process.env.COOKIE_SECURE === "true",
     trustProxy: process.env.TRUST_PROXY === "true",
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY?.trim() ?? "",
+    vapidPrivateKey: process.env.VAPID_PRIVATE_KEY?.trim() ?? "",
+    vapidSubject: process.env.VAPID_SUBJECT?.trim() || "mailto:admin@localhost",
   };
 }
 
@@ -53,5 +59,6 @@ export function systemInfo(config: AppConfig, dataStore: "file" | "postgres") {
     calendarOAuthReady: Boolean(config.googleClientId && config.googleClientSecret && config.googleRedirectUri),
     dataStore,
     bootstrapConfigured: Boolean(config.bootstrapAdminEmail),
+    pushReady: Boolean(config.vapidPublicKey && config.vapidPrivateKey),
   };
 }

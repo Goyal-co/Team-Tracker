@@ -21,6 +21,7 @@ export const createTaskSchema = z
     Department: text(80).optional().default(""),
     Reviewer_ID: z.string().optional().default(""),
     Remarks: text(2000).optional().default(""),
+    CC_User_Ids: z.array(z.string().min(1)).optional().default([]),
   })
   .superRefine((value, ctx) => {
     if (value.Start_Date && value.Due_Date < value.Start_Date) {
@@ -45,6 +46,7 @@ export const updateTaskSchema = z
     Department: text(80).optional(),
     Reviewer_ID: z.string().optional(),
     Remarks: text(2000).optional(),
+    CC_User_Ids: z.array(z.string().min(1)).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.Start_Date && value.Due_Date && value.Due_Date < value.Start_Date) {

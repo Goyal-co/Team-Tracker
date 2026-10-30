@@ -7,6 +7,7 @@ import { loadConfig } from "./config";
 import { createApp } from "./app";
 import { prepareDatabase } from "../src/domain/workspace";
 import { createPgLock, createPgRateLimit, createPgSessions, createPgTokens, createPgVersions, createPostgresStore, createRedisVersions, ensureWorkspaceSchema, workspaceIsEmpty } from "./postgres";
+import { createPushStore } from "./push";
 import { createRedisLock, createRedisRateLimit, createRedisSessions, createRedisTokens } from "./redis-store";
 import { readJsonFile, type SessionRecord, type TokenRecord } from "./store";
 
@@ -91,7 +92,9 @@ async function main() {
   }
   const sessions = redisReady && redis ? createRedisSessions(redis) : createPgSessions(pool);
   const tokens = redisReady && redis ? createRedisTokens(redis) : createPgTokens(pool);
-  const store = createPostgresStore(pool, redisReady && redis ? createRedisVersions(redis) : createPgVersions(pool));
+  const versions = redisReady && redis ? createRedisVersions(redis) : createPgVersions(pool);
+  const store = createPostgresStore(pool, versions);
+  const pushStore = createPushStore(pool);
   if (await workspaceIsEmpty(pool)) {
     const file = path.join(config.dataDir, "db.json");
     if (fs.existsSync(file)) {
@@ -118,6 +121,8 @@ async function main() {
     sessions,
     tokens,
     uploadDir: path.join(config.dataDir, "uploads"),
+    versions,
+    pushStore,
     lock: redisReady && redis ? createRedisLock(redis) : createPgLock(pool),
     allow: redisReady && redis ? createRedisRateLimit(redis) : createPgRateLimit(pool),
   });

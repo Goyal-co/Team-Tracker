@@ -13,12 +13,14 @@ import { TaskBoard } from "../components/task-board";
 import { Avatar, Button, Dialog, Drawer, EmptyState, Field, PageHeader, SelectInput, TextInput } from "../components/ui";
 
 export function TeamPage() {
-  const { data, createTeam, createProject, addMember, invitePerson, revokeInvite, updateTask, transitionTask } = useWorkspace();
+  const { data, createTeam, renameTeam, deleteTeam, createProject, addMember, invitePerson, revokeInvite, updateTask, transitionTask } = useWorkspace();
   const shell = useShell();
   const toast = useToast();
   const navigate = useNavigate();
   const [teamId, setTeamId] = useState(data.teams.find((team) => team.Status === "Active")?.Team_ID ?? "");
   const [teamName, setTeamName] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectKey, setProjectKey] = useState("");
   const [personId, setPersonId] = useState("");
@@ -28,6 +30,9 @@ export function TeamPage() {
   const [workView, setWorkView] = useState<"board" | "list">("board");
   const admin = data.me.Access_Role === "Admin";
   const team = data.teams.find((item) => item.Team_ID === teamId);
+  useEffect(() => {
+    if (team) setRenameValue(team.Name);
+  }, [team?.Team_ID, team?.Name]);
   const projects = data.projects.filter((project) => project.Team_ID === teamId && project.Status === "Active");
   const members = data.members.filter((member) => member.Team_ID === teamId && member.Status === "Active");
   const invites = data.invites.filter((invite) => invite.Team_ID === teamId && invite.Status === "Pending");
@@ -84,8 +89,45 @@ export function TeamPage() {
       {team && (
         <section className="overflow-hidden rounded-xl border border-line bg-white">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
-            <h2 className="text-[16px] font-semibold">{team.Name}</h2>
-            <div className="flex gap-2">
+            <div className="min-w-0 flex-1">
+              {renaming && admin ? (
+                <form
+                  className="flex flex-wrap items-end gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void run(async () => {
+                      await renameTeam(teamId, renameValue);
+                      setRenaming(false);
+                    }, "Group renamed.");
+                  }}
+                >
+                  <Field label="Group name"><TextInput value={renameValue} onChange={(event) => setRenameValue(event.target.value)} required /></Field>
+                  <Button type="submit">Save</Button>
+                  <Button type="button" variant="secondary" onClick={() => { setRenaming(false); setRenameValue(team.Name); }}>Cancel</Button>
+                </form>
+              ) : (
+                <h2 className="text-[16px] font-semibold">{team.Name}</h2>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {admin && !renaming && <Button type="button" variant="secondary" onClick={() => setRenaming(true)}>Rename</Button>}
+              {admin && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    if (!window.confirm(`Permanently delete “${team.Name}”? Its work, chat, and projects will be removed and cannot be restored.`)) return;
+                    void run(async () => {
+                      const remaining = data.teams.filter((item) => item.Status === "Active" && item.Team_ID !== teamId);
+                      await deleteTeam(teamId);
+                      setTeamId(remaining[0]?.Team_ID ?? "");
+                      setRenaming(false);
+                    }, "Group deleted.");
+                  }}
+                >
+                  Delete
+                </Button>
+              )}
               {canCreateTasks(data.me, data.members) && <Button type="button" onClick={() => shell.openCreateTask(teamId)}>Assign work</Button>}
               <Button type="button" variant="secondary" onClick={() => navigate(`/chat?group=${teamId}`)}>Open chat</Button>
             </div>

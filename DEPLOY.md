@@ -51,6 +51,7 @@ Required values:
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client. |
 | `GOOGLE_REDIRECT_URI` | `https://<your-domain>/api/google/calendar/callback`, must also be registered in Google Cloud. |
 | `COOKIE_SECURE` / `TRUST_PROXY` | `true` when behind nginx with HTTPS. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Optional. Generate with `npx web-push generate-vapid-keys`. Enables OS push alerts. With these set, signed-in users see an **Allow alerts** banner until they grant permission. |
 
 ## 3. Run
 

@@ -17,7 +17,10 @@ coverage
 *.md
 Dockerfile
 docker-compose.yml
+compose.yml
+compose.local.yml
 .vscode
 .idea
 .DS_Store
 **/*.test.ts
+**/*.test.tsx

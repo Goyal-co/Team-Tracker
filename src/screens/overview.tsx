@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatDay, formatTime, greeting, isOverdue, kolkataDayFromIso, kolkataToday } from "../domain/dates";
 import { firstName } from "../domain/format";
+import { tasksNeedingMyReview } from "../domain/inbox";
 import { applyTaskFilters } from "../domain/query";
 import type { Task, TaskStatus } from "../domain/types";
 import { useWorkspace } from "../state";
@@ -11,7 +12,7 @@ import { useShell } from "../components/shell";
 import { OverdueBadge, PriorityBadge, StatusBadge } from "../components/badges";
 import { FilterBar, filterControlClass } from "../components/filters";
 import { TaskBoard } from "../components/task-board";
-import { Button, SelectInput } from "../components/ui";
+import { Avatar, Button, SelectInput } from "../components/ui";
 
 export function OverviewPage() {
   const { data, transitionTask } = useWorkspace();
@@ -25,6 +26,7 @@ export function OverviewPage() {
   const [period, setPeriod] = useState("all");
   const names = useMemo(() => new Map(data.users.map((user) => [user.User_ID, user.Name])), [data.users]);
   const tasks = applyTaskFilters(data.tasks, { teamId, employeeId: employee, projectId, period }, today, names);
+  const reviewQueue = tasksNeedingMyReview(data).slice(0, 8);
   const now = new Date().toISOString();
   const meetings = data.meetings
     .filter((meeting) => meeting.Status === "Scheduled" && meeting.End_DateTime >= now)
@@ -40,7 +42,7 @@ export function OverviewPage() {
     if (to === "Blocked" && !reason.trim()) return;
     try {
       await transitionTask(task.Task_ID, { Updated_At: task.Updated_At, to, reason });
-      toast(to === "Under Review" ? "Sent to the person who assigned it." : "Work moved.");
+      toast(to === "Under Review" ? "Submitted for review." : to === "Completed" ? "Task approved." : "Work moved.");
     } catch (error) {
       toast(error instanceof Error ? error.message : "That move is not allowed.", "error");
     }
@@ -103,6 +105,47 @@ export function OverviewPage() {
           </SelectInput>
         </FilterBar>
       </div>
+      {reviewQueue.length > 0 && (
+        <section className="mt-4 overflow-hidden rounded-xl border border-accent/30 bg-white shadow-[inset_3px_0_0_0_#0C66E4]">
+          <header className="flex items-center justify-between gap-2 border-b border-line bg-accent-soft/70 px-4 py-3">
+            <h2 className="text-[13px] font-semibold text-ink">Needs my review</h2>
+            <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-white">{reviewQueue.length}</span>
+          </header>
+          <ul className="divide-y divide-line">
+            {reviewQueue.map((task) => {
+              const owner = names.get(task.Assigned_To) || "Unassigned";
+              return (
+                <li key={task.Task_ID} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <Avatar name={owner} size={32} />
+                  <button type="button" className="min-w-0 flex-1 text-left" onClick={() => shell.openTask(task.Task_ID)}>
+                    <span className="block text-[11px] font-semibold text-accent">{task.Key || task.Task_ID}</span>
+                    <span className="block text-[13px] font-medium leading-5">{task.Task_Title}</span>
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted">
+                      <StatusBadge status={task.Status} />
+                      <span>{owner}</span>
+                      {task.Due_Date && <span>Due {formatDay(task.Due_Date)}</span>}
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      type="button"
+                      className="h-8 px-3"
+                      onClick={() => {
+                        void transitionTask(task.Task_ID, { Updated_At: task.Updated_At, to: "Completed", reason: "" })
+                          .then(() => toast("Task approved."))
+                          .catch((error: unknown) => toast(error instanceof Error ? error.message : "Could not approve that task.", "error"));
+                      }}
+                    >
+                      Approve
+                    </Button>
+                    <Button type="button" variant="secondary" className="h-8 px-3" onClick={() => shell.openTask(task.Task_ID)}>Open</Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start">
         <section className="min-w-0 flex-1">
           <h2 className="mb-2 text-[13px] font-semibold">My work</h2>

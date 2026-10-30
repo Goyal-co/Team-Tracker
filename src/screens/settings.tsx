@@ -6,7 +6,7 @@ import { useToast } from "../toast";
 import { Button, Field, PageHeader, TextInput } from "../components/ui";
 
 export function SettingsPage() {
-  const { data, saveSettings, disconnectCalendar, saveProfileName } = useWorkspace();
+  const { data, saveSettings, disconnectCalendar, saveProfileName, enablePush, disablePush } = useWorkspace();
   const toast = useToast();
   const [params] = useSearchParams();
   const start = data.settings.find((item) => item.Key === "workday_start")?.Value ?? "09:30";
@@ -16,9 +16,22 @@ export function SettingsPage() {
   const [workEnd, setWorkEnd] = useState(end);
   const [workdays, setWorkdays] = useState(days);
   const [profileName, setProfileName] = useState(data.me.Name);
+  const [pushOn, setPushOn] = useState(() => window.localStorage.getItem("goyal-push") === "on");
+  const [pushBusy, setPushBusy] = useState(false);
   useEffect(() => {
     setProfileName(data.me.Name);
   }, [data.me.Name]);
+  useEffect(() => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    void navigator.serviceWorker.ready
+      .then((registration) => registration.pushManager.getSubscription())
+      .then((subscription) => {
+        const on = Boolean(subscription);
+        setPushOn(on);
+        window.localStorage.setItem("goyal-push", on ? "on" : "off");
+      })
+      .catch(() => undefined);
+  }, []);
   const admin = data.me.Access_Role === "Admin";
   const calendarNote = params.get("calendar");
 
@@ -73,6 +86,53 @@ export function SettingsPage() {
         <div className="mt-3 flex gap-2">
           {data.calendarOAuthReady && !data.calendarConnected && <a className="inline-flex h-9 items-center rounded-[10px] bg-accent px-3 text-[13px] font-medium text-white" href="/api/google/calendar/connect">Accept Google permissions</a>}
           {data.calendarConnected && <Button type="button" variant="secondary" onClick={() => void disconnectCalendar().then(() => toast("Google Calendar disconnected.")).catch((error: Error) => toast(error.message, "error"))}>Disconnect</Button>}
+        </div>
+      </section>
+      <section className="mb-4 rounded-xl border border-line bg-white p-4">
+        <h2 className="text-[14px] font-semibold">Desktop / phone alerts</h2>
+        <p className="mt-2 text-[13px] leading-5 text-muted">
+          {data.pushReady
+            ? "Push alerts appear when this app is in the background. On iPhone, install Goyal Workspace to the Home Screen first."
+            : "The server does not have VAPID keys yet. Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, and VAPID_SUBJECT, then restart."}
+        </p>
+        <div className="mt-3 flex gap-2">
+          {data.pushReady && !pushOn && (
+            <Button
+              type="button"
+              disabled={pushBusy}
+              onClick={() => {
+                setPushBusy(true);
+                void enablePush()
+                  .then((ok) => {
+                    setPushOn(ok);
+                    toast(ok ? "Push alerts are on." : "Permission was not granted.", ok ? "success" : "error");
+                  })
+                  .catch((error: Error) => toast(error.message, "error"))
+                  .finally(() => setPushBusy(false));
+              }}
+            >
+              Turn on alerts
+            </Button>
+          )}
+          {data.pushReady && pushOn && (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pushBusy}
+              onClick={() => {
+                setPushBusy(true);
+                void disablePush()
+                  .then(() => {
+                    setPushOn(false);
+                    toast("Push alerts are off.");
+                  })
+                  .catch((error: Error) => toast(error.message, "error"))
+                  .finally(() => setPushBusy(false));
+              }}
+            >
+              Turn off alerts
+            </Button>
+          )}
         </div>
       </section>
       <section className="mb-4 rounded-xl border border-line bg-white p-4">
