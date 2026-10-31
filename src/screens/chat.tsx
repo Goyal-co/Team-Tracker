@@ -85,7 +85,7 @@ export function ChatPage() {
   }
 
   function openPerson(id: string) {
-    setProfileId(id);
+    setProfileId(null);
     setParams({ with: id });
   }
 
@@ -169,7 +169,7 @@ export function ChatPage() {
             {person ? (
               <button type="button" className="text-left" onClick={() => setProfileId(person.User_ID)}>
                 <h1 className="text-[15px] font-semibold">{person.Name}</h1>
-                <p className="text-[12px] text-muted">Private chat · open profile</p>
+                <p className="text-[12px] text-muted">Private chat · tap name for profile</p>
               </button>
             ) : (
               <>
@@ -212,7 +212,10 @@ export function ChatPage() {
           person={profile}
           presence={presence}
           onClose={() => setProfileId(null)}
-          onMessage={() => openPerson(profile.User_ID)}
+          onMessage={() => {
+            setProfileId(null);
+            setParams({ with: profile.User_ID });
+          }}
           onSchedule={() => shell.openCreateMeeting(kolkataToday(), [profile.User_ID])}
           onOpenTask={shell.openTask}
           onOpenMeeting={shell.openMeeting}
@@ -254,9 +257,9 @@ function PersonPanel({
     .slice(0, 6);
   const day = presence?.people[0];
   return (
-    <aside className="flex w-full shrink-0 flex-col border-line bg-white md:w-72 md:border-l">
+    <aside className="flex w-full min-w-0 shrink-0 flex-col border-line bg-white md:w-72 md:border-l">
       <div className="flex items-center gap-3 border-b border-line px-3 py-3">
-        <button type="button" className="text-[13px] text-accent md:hidden" onClick={onClose}>Back</button>
+        <button type="button" className="text-[13px] text-accent md:hidden" onClick={onClose}>Back to chat</button>
         <Avatar name={person.Name} size={40} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[15px] font-semibold">{person.Name}</h2>

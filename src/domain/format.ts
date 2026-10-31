@@ -1,17 +1,48 @@
 import type { ActivityLog, Meeting, Task, User } from "./types";
 
-export function commentParts(body: string, users: User[]): Array<{ kind: "text"; value: string } | { kind: "mention"; userId: string; label: string }> {
-  const parts: Array<{ kind: "text"; value: string } | { kind: "mention"; userId: string; label: string }> = [];
+export type CommentPart =
+  | { kind: "text"; value: string }
+  | { kind: "mention"; userId: string; label: string }
+  | { kind: "link"; href: string; label: string };
+
+const URL_PATTERN = /\b((?:https?:\/\/|www\.)[^\s<>"'`]+)/gi;
+
+function splitUrls(value: string): CommentPart[] {
+  const parts: CommentPart[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(URL_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > cursor) parts.push({ kind: "text", value: value.slice(cursor, index) });
+    let label = match[1];
+    let trailing = "";
+    while (label.length > 0 && /[.,;:!?)\]}'"]$/.test(label)) {
+      trailing = `${label.slice(-1)}${trailing}`;
+      label = label.slice(0, -1);
+    }
+    if (label) {
+      parts.push({ kind: "link", href: label.startsWith("www.") ? `https://${label}` : label, label });
+    } else {
+      trailing = `${match[1]}${trailing}`;
+    }
+    if (trailing) parts.push({ kind: "text", value: trailing });
+    cursor = index + match[0].length;
+  }
+  if (cursor < value.length) parts.push({ kind: "text", value: value.slice(cursor) });
+  return parts.length ? parts : [{ kind: "text", value }];
+}
+
+export function commentParts(body: string, users: User[]): CommentPart[] {
+  const parts: CommentPart[] = [];
   const pattern = /@\[([^\]]+)\]\(([^)\s]+)\)/g;
   let cursor = 0;
   for (const match of body.matchAll(pattern)) {
     const index = match.index ?? 0;
-    if (index > cursor) parts.push({ kind: "text", value: body.slice(cursor, index) });
+    if (index > cursor) parts.push(...splitUrls(body.slice(cursor, index)));
     const user = users.find((item) => item.User_ID === match[2]);
     parts.push({ kind: "mention", userId: match[2], label: user?.Name || match[1] });
     cursor = index + match[0].length;
   }
-  if (cursor < body.length) parts.push({ kind: "text", value: body.slice(cursor) });
+  if (cursor < body.length) parts.push(...splitUrls(body.slice(cursor)));
   return parts;
 }
 

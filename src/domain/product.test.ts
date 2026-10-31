@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addDays, isOverdue, kolkataMinutes, kolkataToIso, kolkataToday, startOfWeek } from "./dates";
 import { findSlots, interpretGoogleEntry, mergeAvailability } from "./availability";
+import { commentParts } from "./format";
 import { canAssignTo, canEditTaskMetadata, canReview, canViewTask, descendantIds } from "./permissions";
 import { transitionAllowed } from "./workflow";
 import { databaseToSheets, sheetsToDatabase } from "./sheets";
@@ -124,6 +125,28 @@ describe("availability", () => {
     expect(interpretGoogleEntry({ errors: [{}] }).state).toBe("unknown");
     expect(interpretGoogleEntry({ busy: [] }).state).toBe("available");
     expect(interpretGoogleEntry(undefined).state).toBe("unknown");
+  });
+});
+
+describe("commentParts", () => {
+  it("turns pasted URLs into links and keeps mentions", () => {
+    const parts = commentParts("See https://docs.google.com/spreadsheets/d/abc123 and @[Ada](U-1).", []);
+    expect(parts).toEqual([
+      { kind: "text", value: "See " },
+      { kind: "link", href: "https://docs.google.com/spreadsheets/d/abc123", label: "https://docs.google.com/spreadsheets/d/abc123" },
+      { kind: "text", value: " and " },
+      { kind: "mention", userId: "U-1", label: "Ada" },
+      { kind: "text", value: "." },
+    ]);
+  });
+
+  it("prefixes www links and drops trailing punctuation from the href", () => {
+    const parts = commentParts("Open www.example.com/path).", []);
+    expect(parts).toEqual([
+      { kind: "text", value: "Open " },
+      { kind: "link", href: "https://www.example.com/path", label: "www.example.com/path" },
+      { kind: "text", value: ")." },
+    ]);
   });
 });
 

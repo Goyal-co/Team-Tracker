@@ -165,8 +165,8 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
   const due = dueLabel(task.Due_Date, today);
   return (
     <Drawer title={task.Key || task.Task_ID} subtitle={draft.Task_Title} onClose={onClose} wide>
-      <div className="grid gap-6 px-4 py-4 md:grid-cols-[1.15fr_0.85fr]">
-        <div className="space-y-4">
+      <div className="grid gap-6 px-4 py-4 md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <div className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-center gap-1.5">
             <StatusBadge status={task.Status} />
             <span className="inline-flex items-center rounded-[3px] bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700">{task.Type}</span>
@@ -268,7 +268,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
             </div>
           )}
         </div>
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <section>
             <h3 className="mb-2 text-[13px] font-semibold">Progress update</h3>
             <OutsideClose active={suggestions.length > 0} onClose={() => setHideMentions(true)}>
@@ -335,7 +335,7 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
                       {item.kind === "activity" ? (
                         <p className="text-[13px] leading-5">{item.text}</p>
                       ) : (
-                        <p className="text-[13px] leading-5">
+                        <p className="min-w-0 text-[13px] leading-5 break-words [overflow-wrap:anywhere]">
                           <span className="font-medium">{item.author}</span>
                           {": "}
                           <CommentText body={item.body} users={data.users} />
@@ -361,14 +361,16 @@ export function TaskDetailDrawer({ taskId, onClose }: { taskId: string; onClose:
 
 function CommentText({ body, users }: { body: string; users: User[] }) {
   return (
-    <>
+    <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
       {commentParts(body, users).map((part, index) =>
         part.kind === "mention" ? (
           <Link key={`${part.userId}-${index}`} to={`/team/${part.userId}`} className="font-medium text-accent">@{part.label}</Link>
+        ) : part.kind === "link" ? (
+          <a key={index} href={part.href} target="_blank" rel="noopener noreferrer" className="break-all font-medium text-accent underline">{part.label}</a>
         ) : (
           <span key={index}>{part.value}</span>
         ),
       )}
-    </>
+    </span>
   );
 }

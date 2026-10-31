@@ -13,10 +13,12 @@ export function MessageBody({ message, mine, users = [], onMention }: { message:
   return (
     <div className={`mt-0.5 block w-fit max-w-full rounded-2xl px-3 py-2 text-left text-[13px] leading-5 ${mine ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-white shadow-sm"}`}>
       {message.Body && (
-        <p className="whitespace-pre-wrap break-words">
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {commentParts(message.Body, users).map((part, index) =>
             part.kind === "mention" ? (
               <button key={`${part.userId}-${index}`} type="button" className={`font-semibold underline ${mine ? "text-white" : "text-accent"}`} onClick={() => onMention?.(part.userId)}>@{part.label}</button>
+            ) : part.kind === "link" ? (
+              <a key={index} href={part.href} target="_blank" rel="noopener noreferrer" className={`break-all underline ${mine ? "text-white" : "text-accent"}`}>{part.label}</a>
             ) : (
               <span key={index}>{part.value}</span>
             ),
