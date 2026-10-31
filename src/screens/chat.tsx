@@ -57,8 +57,8 @@ export function ChatPage() {
 
   useEffect(() => {
     const scroller = messageScrollerRef.current;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    else endRef.current?.scrollIntoView({ block: "end" });
+    if (!scroller) return;
+    scroller.scrollTop = scroller.scrollHeight;
   }, [thread.length, personId, groupId]);
 
   useEffect(() => {
@@ -71,41 +71,33 @@ export function ChatPage() {
   useEffect(() => {
     if (!personId && !groupId) return;
     const pane = threadPaneRef.current;
+    if (!pane) return;
     const viewport = window.visualViewport;
-    if (!pane || !viewport) return;
 
     const sync = () => {
       if (window.matchMedia("(min-width: 768px)").matches) {
-        pane.style.position = "";
         pane.style.top = "";
-        pane.style.left = "";
-        pane.style.right = "";
         pane.style.height = "";
-        pane.style.width = "";
+        pane.style.transform = "";
         return;
       }
-      pane.style.position = "fixed";
-      pane.style.left = "0";
-      pane.style.right = "0";
-      pane.style.width = "100%";
-      pane.style.top = `${viewport.offsetTop}px`;
-      pane.style.height = `${viewport.height}px`;
+      // Keep the chat chrome pinned to the screen top; only shrink height for the keyboard.
+      // Do not use offsetTop — that scrolls the whole pane up and looks like a second header.
+      const height = viewport?.height ?? window.innerHeight;
+      pane.style.top = "0px";
+      pane.style.height = `${Math.round(height)}px`;
+      pane.style.transform = "";
     };
 
     sync();
-    viewport.addEventListener("resize", sync);
-    viewport.addEventListener("scroll", sync);
+    viewport?.addEventListener("resize", sync);
     window.addEventListener("resize", sync);
     return () => {
-      viewport.removeEventListener("resize", sync);
-      viewport.removeEventListener("scroll", sync);
+      viewport?.removeEventListener("resize", sync);
       window.removeEventListener("resize", sync);
-      pane.style.position = "";
       pane.style.top = "";
-      pane.style.left = "";
-      pane.style.right = "";
       pane.style.height = "";
-      pane.style.width = "";
+      pane.style.transform = "";
     };
   }, [personId, groupId]);
 
@@ -219,15 +211,15 @@ export function ChatPage() {
       <section
         ref={threadPaneRef}
         className={cn(
-          "min-h-0 min-w-0 flex-1 flex-col bg-canvas",
+          "min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas",
           personId || groupId
             ? profile
               ? "hidden md:flex"
-              : "fixed inset-0 z-50 flex md:static md:inset-auto md:z-auto"
+              : "fixed inset-x-0 top-0 z-50 flex h-[100dvh] max-h-[100dvh] md:static md:inset-auto md:z-auto md:h-auto md:max-h-none"
             : "hidden md:flex",
         )}
       >
-        <header className="sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b border-line bg-white px-2 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] sm:px-4">
+        <header className="z-10 flex shrink-0 items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3">
           {(personId || groupId) && (
             <button
               type="button"
@@ -241,25 +233,16 @@ export function ChatPage() {
           <div className="min-w-0 flex-1">
             {person ? (
               <button type="button" className="flex min-w-0 items-center gap-2.5 text-left" onClick={() => setProfileId(person.User_ID)}>
-                <Avatar name={person.Name} size={40} src={personAvatarSrc(person)} />
-                <span className="min-w-0">
-                  <span className="block truncate text-[15px] font-semibold leading-5">{person.Name}</span>
-                  <span className="block truncate text-[12px] text-muted">Tap for profile</span>
-                </span>
+                <Avatar name={person.Name} size={36} src={personAvatarSrc(person)} />
+                <span className="min-w-0 truncate text-[15px] font-semibold leading-5">{person.Name}</span>
               </button>
             ) : group ? (
               <div className="flex min-w-0 items-center gap-2.5">
-                <Avatar name={group.Name} size={40} src={teamAvatarSrc(group)} />
-                <span className="min-w-0">
-                  <span className="block truncate text-[15px] font-semibold leading-5">{group.Name}</span>
-                  <span className="block truncate text-[12px] text-muted">Group chat</span>
-                </span>
+                <Avatar name={group.Name} size={36} src={teamAvatarSrc(group)} />
+                <span className="min-w-0 truncate text-[15px] font-semibold leading-5">{group.Name}</span>
               </div>
             ) : (
-              <>
-                <h1 className="text-[15px] font-semibold">Chat</h1>
-                <p className="text-[12px] text-muted">Choose a group, or search for a person.</p>
-              </>
+              <h1 className="text-[15px] font-semibold">Chat</h1>
             )}
           </div>
         </header>
@@ -287,10 +270,10 @@ export function ChatPage() {
                 </li>
               );
             })}
-            <li ref={endRef} />
+            <li ref={endRef} aria-hidden className="h-0 overflow-hidden" />
           </ul>
         </div>
-        <div className="sticky bottom-0 z-20 shrink-0 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
+        <div className="shrink-0 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
           <Composer
             key={personId || groupId || "none"}
             placeholder={person ? `Message ${person.Name}` : group ? `Message ${group.Name}` : "Choose a conversation"}
