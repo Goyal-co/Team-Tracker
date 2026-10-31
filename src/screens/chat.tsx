@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { formatDateTime, formatDay, formatTime, kolkataDayFromIso, kolkataToday } from "../domain/dates";
+import { formatDay, formatTime, kolkataDayFromIso, kolkataToday } from "../domain/dates";
 import { splitIds } from "../domain/ids";
 import { unreadForPerson, unreadForTeam } from "../domain/inbox";
 import type { Meeting, User, WorkspaceMessage } from "../domain/types";
@@ -23,12 +23,7 @@ export function ChatPage() {
   const [profileId, setProfileId] = useState<string | null>(null);
   const [presence, setPresence] = useState<Awaited<ReturnType<typeof availability>> | null>(null);
   const endRef = useRef<HTMLLIElement>(null);
-  const threadPaneRef = useRef<HTMLElement>(null);
   const messageScrollerRef = useRef<HTMLDivElement>(null);
-  const composerBarRef = useRef<HTMLDivElement>(null);
-  const [composerHeight, setComposerHeight] = useState(64);
-  const [keyboardInset, setKeyboardInset] = useState(0);
-  const [mobileChatLayout, setMobileChatLayout] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const personId = params.get("with") ?? "";
   const groupId = personId ? "" : params.get("group") ?? "";
   const needle = query.trim().toLowerCase();
@@ -63,63 +58,13 @@ export function ChatPage() {
     const scroller = messageScrollerRef.current;
     if (!scroller) return;
     scroller.scrollTop = scroller.scrollHeight;
-  }, [thread.length, personId, groupId, keyboardInset, composerHeight]);
+  }, [thread.length, personId, groupId]);
 
   useEffect(() => {
     shell.setMobileChatOpen(Boolean(personId || groupId));
     return () => shell.setMobileChatOpen(false);
     // setMobileChatOpen is a stable React state setter from the shell
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personId, groupId]);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const sync = () => setMobileChatLayout(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
-  useEffect(() => {
-    if (!personId && !groupId) {
-      setKeyboardInset(0);
-      return;
-    }
-    const viewport = window.visualViewport;
-    const bar = composerBarRef.current;
-
-    const measureComposer = () => {
-      if (bar) setComposerHeight(Math.ceil(bar.getBoundingClientRect().height) || 64);
-    };
-
-    const syncKeyboard = () => {
-      if (!window.matchMedia("(max-width: 767px)").matches) {
-        setKeyboardInset(0);
-        measureComposer();
-        return;
-      }
-      // Keep the chat shell full-screen. Only lift the composer by the covered inset
-      // so the header and text box stay put while messages resize in the middle.
-      const layoutHeight = window.innerHeight;
-      const visibleBottom = viewport ? viewport.height + viewport.offsetTop : layoutHeight;
-      setKeyboardInset(Math.max(0, Math.round(layoutHeight - visibleBottom)));
-      measureComposer();
-      window.scrollTo(0, 0);
-    };
-
-    syncKeyboard();
-    viewport?.addEventListener("resize", syncKeyboard);
-    viewport?.addEventListener("scroll", syncKeyboard);
-    window.addEventListener("resize", syncKeyboard);
-    const observer = typeof ResizeObserver !== "undefined" && bar ? new ResizeObserver(measureComposer) : null;
-    if (bar && observer) observer.observe(bar);
-    return () => {
-      viewport?.removeEventListener("resize", syncKeyboard);
-      viewport?.removeEventListener("scroll", syncKeyboard);
-      window.removeEventListener("resize", syncKeyboard);
-      observer?.disconnect();
-      setKeyboardInset(0);
-    };
   }, [personId, groupId]);
 
   const openUnreadIds = useMemo(() => {
@@ -171,7 +116,8 @@ export function ChatPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas md:flex-row">
       <aside className={`flex w-full shrink-0 flex-col border-line bg-white md:w-72 md:border-r ${personId || groupId ? "hidden md:flex" : "flex"}`}>
-        <div className="border-b border-line p-3">
+        <div className="border-b border-line px-3 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-3">
+          <h1 className="mb-2 text-[17px] font-semibold tracking-tight md:hidden">Chats</h1>
           <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people" className="w-full" />
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
@@ -230,22 +176,16 @@ export function ChatPage() {
         </div>
       </aside>
       <section
-        ref={threadPaneRef}
         className={cn(
           "min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas",
           personId || groupId
             ? profile
               ? "hidden md:flex"
-              : "fixed inset-0 z-50 flex md:static md:inset-auto md:z-auto"
+              : "fixed inset-0 z-50 flex h-[100dvh] md:static md:inset-auto md:z-auto md:h-auto"
             : "hidden md:flex",
         )}
       >
-        <header
-          className={cn(
-            "z-20 flex items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3 md:static md:shrink-0 md:pt-2",
-            mobileChatLayout && (personId || groupId) ? "absolute inset-x-0 top-0" : "shrink-0",
-          )}
-        >
+        <header className="flex shrink-0 items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3">
           {(personId || groupId) && (
             <button
               type="button"
@@ -260,49 +200,52 @@ export function ChatPage() {
             {person ? (
               <button type="button" className="flex min-w-0 items-center gap-2.5 text-left" onClick={() => setProfileId(person.User_ID)}>
                 <Avatar name={person.Name} size={36} src={personAvatarSrc(person)} />
-                <span className="min-w-0 truncate text-[15px] font-semibold leading-5">{person.Name}</span>
+                <span className="min-w-0 truncate text-[15px] font-semibold">{person.Name}</span>
               </button>
             ) : group ? (
               <div className="flex min-w-0 items-center gap-2.5">
                 <Avatar name={group.Name} size={36} src={teamAvatarSrc(group)} />
-                <span className="min-w-0 truncate text-[15px] font-semibold leading-5">{group.Name}</span>
+                <span className="min-w-0 truncate text-[15px] font-semibold">{group.Name}</span>
               </div>
             ) : (
               <h1 className="text-[15px] font-semibold">Chat</h1>
             )}
           </div>
         </header>
-        <div
-          ref={messageScrollerRef}
-          className={cn("overflow-y-auto overscroll-contain md:static md:min-h-0 md:flex-1", mobileChatLayout && (personId || groupId) ? "absolute inset-x-0" : "min-h-0 flex-1")}
-          style={
-            mobileChatLayout && (personId || groupId)
-              ? {
-                  top: "calc(3.25rem + env(safe-area-inset-top, 0px))",
-                  bottom: composerHeight + keyboardInset,
-                }
-              : undefined
-          }
-        >
-          <ul className="flex min-h-full flex-col justify-end gap-3 px-3 py-3 sm:px-4">
-            {!personId && !groupId && <li className="text-[13px] text-muted">Open a group, or search for someone you have not chatted with yet.</li>}
-            {(personId || groupId) && thread.length === 0 && <li className="text-[13px] text-muted">No messages yet.</li>}
-            {thread.map((message) => {
+        <div ref={messageScrollerRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <ul className="flex min-h-full flex-col justify-end gap-1 px-3 py-3 sm:px-4">
+            {!personId && !groupId && <li className="py-8 text-center text-[13px] text-muted">Open a group, or search for someone you have not chatted with yet.</li>}
+            {(personId || groupId) && thread.length === 0 && <li className="py-8 text-center text-[13px] text-muted">No messages yet. Say hello.</li>}
+            {thread.map((message, index) => {
               const mine = message.Author_ID === me;
               const authorUser = data.users.find((user) => user.User_ID === message.Author_ID);
               const author = authorUser?.Name ?? names.get(message.Author_ID) ?? "Someone";
+              const prev = thread[index - 1];
+              const next = thread[index + 1];
+              const startOfRun = !prev || prev.Author_ID !== message.Author_ID;
+              const endOfRun = !next || next.Author_ID !== message.Author_ID;
+              const showName = Boolean(groupId) && !mine && startOfRun;
               return (
-                <li key={message.Message_ID} className={cn("flex items-end gap-2", mine && "flex-row-reverse")}>
+                <li key={message.Message_ID} className={cn("flex items-end gap-2", mine && "flex-row-reverse", startOfRun && index > 0 && "mt-2")}>
                   {!mine && (
-                    <button type="button" className="shrink-0" aria-label={`Open ${author}`} onClick={() => setProfileId(message.Author_ID)}>
-                      <Avatar name={author} size={28} src={personAvatarSrc(authorUser)} />
-                    </button>
+                    <span className="w-7 shrink-0">
+                      {endOfRun ? (
+                        <button type="button" aria-label={`Open ${author}`} onClick={() => setProfileId(message.Author_ID)}>
+                          <Avatar name={author} size={28} src={personAvatarSrc(authorUser)} />
+                        </button>
+                      ) : null}
+                    </span>
                   )}
-                  <div className={cn("flex min-w-0 max-w-[min(28rem,80vw)] flex-col", mine ? "items-end" : "items-start")}>
-                    <button type="button" className="mb-0.5 text-[11px] leading-4 text-muted" onClick={() => setProfileId(message.Author_ID)}>
-                      {author} · {formatDateTime(message.Created_At)}
-                    </button>
+                  <div className={cn("flex min-w-0 max-w-[min(28rem,78vw)] flex-col", mine ? "items-end" : "items-start")}>
+                    {showName && (
+                      <button type="button" className="mb-0.5 px-1 text-[11px] font-medium leading-4 text-muted" onClick={() => setProfileId(message.Author_ID)}>
+                        {author}
+                      </button>
+                    )}
                     <MessageBody message={message} mine={mine} users={data.users} onMention={setProfileId} />
+                    {endOfRun && (
+                      <span className="mt-0.5 px-1 text-[10px] leading-4 text-muted">{formatTime(message.Created_At)}</span>
+                    )}
                   </div>
                 </li>
               );
@@ -310,18 +253,10 @@ export function ChatPage() {
             <li ref={endRef} aria-hidden className="h-0 overflow-hidden" />
           </ul>
         </div>
-        <div
-          ref={composerBarRef}
-          className={cn("z-20 border-t border-line bg-white md:static md:shrink-0", mobileChatLayout && (personId || groupId) ? "absolute inset-x-0" : "shrink-0")}
-          style={
-            mobileChatLayout && (personId || groupId)
-              ? { bottom: keyboardInset, paddingBottom: keyboardInset > 0 ? 0 : "env(safe-area-inset-bottom)" }
-              : undefined
-          }
-        >
+        <div className="shrink-0 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
           <Composer
             key={personId || groupId || "none"}
-            placeholder={person ? `Message ${person.Name}` : group ? `Message ${group.Name}` : "Choose a conversation"}
+            placeholder={person ? "Message…" : group ? `Message ${group.Name}` : "Choose a conversation"}
             disabled={!personId && !groupId}
             mentions={group ? data.users.filter((user) => user.User_ID !== me && user.Status === "Active" && data.members.some((member) => member.Team_ID === group.Team_ID && member.User_ID === user.User_ID && member.Status === "Active")) : []}
             onSend={send}
