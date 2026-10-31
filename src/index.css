@@ -41,6 +41,9 @@ textarea {
   }
 
   body.chat-immersive {
+    position: fixed;
+    inset: 0;
+    width: 100%;
     overflow: hidden;
     overscroll-behavior: none;
     touch-action: manipulation;

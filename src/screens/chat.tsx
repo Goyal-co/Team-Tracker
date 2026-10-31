@@ -25,6 +25,10 @@ export function ChatPage() {
   const endRef = useRef<HTMLLIElement>(null);
   const threadPaneRef = useRef<HTMLElement>(null);
   const messageScrollerRef = useRef<HTMLDivElement>(null);
+  const composerBarRef = useRef<HTMLDivElement>(null);
+  const [composerHeight, setComposerHeight] = useState(64);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const [mobileChatLayout, setMobileChatLayout] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const personId = params.get("with") ?? "";
   const groupId = personId ? "" : params.get("group") ?? "";
   const needle = query.trim().toLowerCase();
@@ -59,7 +63,7 @@ export function ChatPage() {
     const scroller = messageScrollerRef.current;
     if (!scroller) return;
     scroller.scrollTop = scroller.scrollHeight;
-  }, [thread.length, personId, groupId]);
+  }, [thread.length, personId, groupId, keyboardInset, composerHeight]);
 
   useEffect(() => {
     shell.setMobileChatOpen(Boolean(personId || groupId));
@@ -69,35 +73,52 @@ export function ChatPage() {
   }, [personId, groupId]);
 
   useEffect(() => {
-    if (!personId && !groupId) return;
-    const pane = threadPaneRef.current;
-    if (!pane) return;
-    const viewport = window.visualViewport;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const sync = () => setMobileChatLayout(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
-    const sync = () => {
-      if (window.matchMedia("(min-width: 768px)").matches) {
-        pane.style.top = "";
-        pane.style.height = "";
-        pane.style.transform = "";
-        return;
-      }
-      // Keep the chat chrome pinned to the screen top; only shrink height for the keyboard.
-      // Do not use offsetTop — that scrolls the whole pane up and looks like a second header.
-      const height = viewport?.height ?? window.innerHeight;
-      pane.style.top = "0px";
-      pane.style.height = `${Math.round(height)}px`;
-      pane.style.transform = "";
+  useEffect(() => {
+    if (!personId && !groupId) {
+      setKeyboardInset(0);
+      return;
+    }
+    const viewport = window.visualViewport;
+    const bar = composerBarRef.current;
+
+    const measureComposer = () => {
+      if (bar) setComposerHeight(Math.ceil(bar.getBoundingClientRect().height) || 64);
     };
 
-    sync();
-    viewport?.addEventListener("resize", sync);
-    window.addEventListener("resize", sync);
+    const syncKeyboard = () => {
+      if (!window.matchMedia("(max-width: 767px)").matches) {
+        setKeyboardInset(0);
+        measureComposer();
+        return;
+      }
+      // Keep the chat shell full-screen. Only lift the composer by the covered inset
+      // so the header and text box stay put while messages resize in the middle.
+      const layoutHeight = window.innerHeight;
+      const visibleBottom = viewport ? viewport.height + viewport.offsetTop : layoutHeight;
+      setKeyboardInset(Math.max(0, Math.round(layoutHeight - visibleBottom)));
+      measureComposer();
+      window.scrollTo(0, 0);
+    };
+
+    syncKeyboard();
+    viewport?.addEventListener("resize", syncKeyboard);
+    viewport?.addEventListener("scroll", syncKeyboard);
+    window.addEventListener("resize", syncKeyboard);
+    const observer = typeof ResizeObserver !== "undefined" && bar ? new ResizeObserver(measureComposer) : null;
+    if (bar && observer) observer.observe(bar);
     return () => {
-      viewport?.removeEventListener("resize", sync);
-      window.removeEventListener("resize", sync);
-      pane.style.top = "";
-      pane.style.height = "";
-      pane.style.transform = "";
+      viewport?.removeEventListener("resize", syncKeyboard);
+      viewport?.removeEventListener("scroll", syncKeyboard);
+      window.removeEventListener("resize", syncKeyboard);
+      observer?.disconnect();
+      setKeyboardInset(0);
     };
   }, [personId, groupId]);
 
@@ -215,11 +236,16 @@ export function ChatPage() {
           personId || groupId
             ? profile
               ? "hidden md:flex"
-              : "fixed inset-x-0 top-0 z-50 flex h-[100dvh] max-h-[100dvh] md:static md:inset-auto md:z-auto md:h-auto md:max-h-none"
+              : "fixed inset-0 z-50 flex md:static md:inset-auto md:z-auto"
             : "hidden md:flex",
         )}
       >
-        <header className="z-10 flex shrink-0 items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3">
+        <header
+          className={cn(
+            "z-20 flex items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3 md:static md:shrink-0 md:pt-2",
+            mobileChatLayout && (personId || groupId) ? "absolute inset-x-0 top-0" : "shrink-0",
+          )}
+        >
           {(personId || groupId) && (
             <button
               type="button"
@@ -246,7 +272,18 @@ export function ChatPage() {
             )}
           </div>
         </header>
-        <div ref={messageScrollerRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div
+          ref={messageScrollerRef}
+          className={cn("overflow-y-auto overscroll-contain md:static md:min-h-0 md:flex-1", mobileChatLayout && (personId || groupId) ? "absolute inset-x-0" : "min-h-0 flex-1")}
+          style={
+            mobileChatLayout && (personId || groupId)
+              ? {
+                  top: "calc(3.25rem + env(safe-area-inset-top, 0px))",
+                  bottom: composerHeight + keyboardInset,
+                }
+              : undefined
+          }
+        >
           <ul className="flex min-h-full flex-col justify-end gap-3 px-3 py-3 sm:px-4">
             {!personId && !groupId && <li className="text-[13px] text-muted">Open a group, or search for someone you have not chatted with yet.</li>}
             {(personId || groupId) && thread.length === 0 && <li className="text-[13px] text-muted">No messages yet.</li>}
@@ -273,7 +310,15 @@ export function ChatPage() {
             <li ref={endRef} aria-hidden className="h-0 overflow-hidden" />
           </ul>
         </div>
-        <div className="shrink-0 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
+        <div
+          ref={composerBarRef}
+          className={cn("z-20 border-t border-line bg-white md:static md:shrink-0", mobileChatLayout && (personId || groupId) ? "absolute inset-x-0" : "shrink-0")}
+          style={
+            mobileChatLayout && (personId || groupId)
+              ? { bottom: keyboardInset, paddingBottom: keyboardInset > 0 ? 0 : "env(safe-area-inset-bottom)" }
+              : undefined
+          }
+        >
           <Composer
             key={personId || groupId || "none"}
             placeholder={person ? `Message ${person.Name}` : group ? `Message ${group.Name}` : "Choose a conversation"}
