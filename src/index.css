@@ -40,12 +40,9 @@ textarea {
     font-size: 16px !important;
   }
 
-  /* Lock the document so the keyboard cannot pan the whole page (and the chat header) up. */
+  /* Lock scroll while a chat thread is open. Avoid position:fixed here ? it
+     jumps the chats list up and looks like a second profile bar is sliding in. */
   body.chat-immersive {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
     overflow: hidden;
     overscroll-behavior: none;
     touch-action: manipulation;

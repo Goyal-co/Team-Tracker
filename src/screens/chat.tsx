@@ -24,12 +24,14 @@ export function ChatPage() {
   const [presence, setPresence] = useState<Awaited<ReturnType<typeof availability>> | null>(null);
   const endRef = useRef<HTMLLIElement>(null);
   const messageScrollerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const [mobileLayout, setMobileLayout] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
-  const [viewportHeight, setViewportHeight] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 0));
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(56);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const personId = params.get("with") ?? "";
   const groupId = personId ? "" : params.get("group") ?? "";
   const conversationOpen = Boolean(personId || groupId);
+  const keyboardOpen = keyboardInset > 48;
 
   function scrollToLatest() {
     const scroller = messageScrollerRef.current;
@@ -69,7 +71,7 @@ export function ChatPage() {
     scrollToLatest();
     const frame = window.requestAnimationFrame(scrollToLatest);
     return () => window.cancelAnimationFrame(frame);
-  }, [thread.length, personId, groupId, viewportHeight]);
+  }, [thread.length, personId, groupId, keyboardInset, headerHeight]);
 
   useEffect(() => {
     shell.setMobileChatOpen(conversationOpen);
@@ -88,38 +90,43 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!conversationOpen) {
-      setViewportHeight(window.innerHeight);
-      setKeyboardOpen(false);
+      setKeyboardInset(0);
       return;
     }
 
-    const syncViewport = () => {
-      window.scrollTo(0, 0);
+    const measureHeader = () => {
+      if (headerRef.current) {
+        setHeaderHeight(Math.ceil(headerRef.current.getBoundingClientRect().height) || 56);
+      }
+    };
+
+    const syncKeyboard = () => {
       if (!window.matchMedia("(max-width: 767px)").matches) {
-        setViewportHeight(window.innerHeight);
-        setKeyboardOpen(false);
+        setKeyboardInset(0);
+        measureHeader();
         return;
       }
       const viewport = window.visualViewport;
-      // Visible height above the keyboard. Keep the pane pinned at top:0 so the
-      // profile stays put; the composer (last flex child) sits on the keyboard.
-      const visible = Math.max(0, Math.round(viewport?.height ?? window.innerHeight));
-      setViewportHeight(visible);
-      setKeyboardOpen(visible < window.innerHeight - 48);
+      const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      // Lift only the messages + composer; the fixed profile header stays put.
+      setKeyboardInset(Math.max(0, Math.round(window.innerHeight - visibleBottom)));
+      measureHeader();
       window.requestAnimationFrame(scrollToLatest);
     };
 
-    syncViewport();
+    syncKeyboard();
     const viewport = window.visualViewport;
-    viewport?.addEventListener("resize", syncViewport);
-    viewport?.addEventListener("scroll", syncViewport);
-    window.addEventListener("resize", syncViewport);
+    viewport?.addEventListener("resize", syncKeyboard);
+    viewport?.addEventListener("scroll", syncKeyboard);
+    window.addEventListener("resize", syncKeyboard);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureHeader) : null;
+    if (headerRef.current) observer?.observe(headerRef.current);
     return () => {
-      viewport?.removeEventListener("resize", syncViewport);
-      viewport?.removeEventListener("scroll", syncViewport);
-      window.removeEventListener("resize", syncViewport);
-      setViewportHeight(window.innerHeight);
-      setKeyboardOpen(false);
+      viewport?.removeEventListener("resize", syncKeyboard);
+      viewport?.removeEventListener("scroll", syncKeyboard);
+      window.removeEventListener("resize", syncKeyboard);
+      observer?.disconnect();
+      setKeyboardInset(0);
     };
   }, [conversationOpen]);
 
@@ -237,16 +244,18 @@ export function ChatPage() {
           conversationOpen
             ? profile
               ? "hidden md:flex"
-              : "fixed inset-x-0 top-0 z-50 flex md:static md:inset-auto md:top-auto md:z-auto"
+              : "fixed inset-0 z-50 flex md:static md:inset-auto md:z-auto"
             : "hidden md:flex",
         )}
-        style={
-          mobileLayout && conversationOpen && !profile
-            ? { height: viewportHeight || undefined }
-            : undefined
-        }
       >
-        <header className="z-[1] flex shrink-0 items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3">
+        <header
+          ref={headerRef}
+          className={cn(
+            "flex items-center gap-1 border-b border-line bg-white px-1.5 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-2 sm:px-3",
+            // Fixed profile bar on mobile so keyboard resize never slides it up / duplicates it.
+            mobileLayout && conversationOpen ? "fixed inset-x-0 top-0 z-[60]" : "relative z-[1] shrink-0",
+          )}
+        >
           {conversationOpen && (
             <button
               type="button"
@@ -273,65 +282,70 @@ export function ChatPage() {
             )}
           </div>
         </header>
-        <div ref={messageScrollerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-          {/* mt-auto keeps the latest bubble parked against the composer, like WhatsApp */}
-          <ul className="mt-auto flex flex-col gap-1 px-3 py-3 sm:px-4">
-            {!conversationOpen && <li className="py-8 text-center text-[13px] text-muted">Open a group, or search for someone you have not chatted with yet.</li>}
-            {conversationOpen && thread.length === 0 && <li className="py-8 text-center text-[13px] text-muted">No messages yet. Say hello.</li>}
-            {thread.map((message, index) => {
-              const mine = message.Author_ID === me;
-              const authorUser = data.users.find((user) => user.User_ID === message.Author_ID);
-              const author = authorUser?.Name ?? names.get(message.Author_ID) ?? "Someone";
-              const prev = thread[index - 1];
-              const next = thread[index + 1];
-              const startOfRun = !prev || prev.Author_ID !== message.Author_ID;
-              const endOfRun = !next || next.Author_ID !== message.Author_ID;
-              const showName = Boolean(groupId) && !mine && startOfRun;
-              return (
-                <li key={message.Message_ID} className={cn("flex items-end gap-2", mine && "flex-row-reverse", startOfRun && index > 0 && "mt-2")}>
-                  {!mine && (
-                    <span className="w-7 shrink-0">
-                      {endOfRun ? (
-                        <button type="button" aria-label={`Open ${author}`} onClick={() => setProfileId(message.Author_ID)}>
-                          <Avatar name={author} size={28} src={personAvatarSrc(authorUser)} />
-                        </button>
-                      ) : null}
-                    </span>
-                  )}
-                  <div className={cn("flex min-w-0 max-w-[min(28rem,78vw)] flex-col", mine ? "items-end" : "items-start")}>
-                    {showName && (
-                      <button type="button" className="mb-0.5 px-1 text-[11px] font-medium leading-4 text-muted" onClick={() => setProfileId(message.Author_ID)}>
-                        {author}
-                      </button>
-                    )}
-                    <MessageBody message={message} mine={mine} users={data.users} onMention={setProfileId} />
-                    {endOfRun && (
-                      <span className="mt-0.5 px-1 text-[10px] leading-4 text-muted">{formatTime(message.Created_At)}</span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-            <li ref={endRef} aria-hidden className="h-px w-full shrink-0" />
-          </ul>
-        </div>
         <div
-          className={cn("shrink-0 border-t border-line bg-white", !keyboardOpen && "pb-[env(safe-area-inset-bottom)]")}
-          onFocusCapture={() => {
-            window.scrollTo(0, 0);
-            window.requestAnimationFrame(() => {
-              window.scrollTo(0, 0);
-              scrollToLatest();
-            });
-          }}
+          className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", mobileLayout && conversationOpen && "fixed inset-x-0")}
+          style={
+            mobileLayout && conversationOpen
+              ? { top: headerHeight, bottom: keyboardInset }
+              : undefined
+          }
         >
-          <Composer
-            key={personId || groupId || "none"}
-            placeholder={person ? "Message…" : group ? `Message ${group.Name}` : "Choose a conversation"}
-            disabled={!conversationOpen}
-            mentions={group ? data.users.filter((user) => user.User_ID !== me && user.Status === "Active" && data.members.some((member) => member.Team_ID === group.Team_ID && member.User_ID === user.User_ID && member.Status === "Active")) : []}
-            onSend={send}
-          />
+          <div ref={messageScrollerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            {/* mt-auto keeps the latest bubble parked against the composer, like WhatsApp */}
+            <ul className="mt-auto flex flex-col gap-1 px-3 py-3 sm:px-4">
+              {!conversationOpen && <li className="py-8 text-center text-[13px] text-muted">Open a group, or search for someone you have not chatted with yet.</li>}
+              {conversationOpen && thread.length === 0 && <li className="py-8 text-center text-[13px] text-muted">No messages yet. Say hello.</li>}
+              {thread.map((message, index) => {
+                const mine = message.Author_ID === me;
+                const authorUser = data.users.find((user) => user.User_ID === message.Author_ID);
+                const author = authorUser?.Name ?? names.get(message.Author_ID) ?? "Someone";
+                const prev = thread[index - 1];
+                const next = thread[index + 1];
+                const startOfRun = !prev || prev.Author_ID !== message.Author_ID;
+                const endOfRun = !next || next.Author_ID !== message.Author_ID;
+                const showName = Boolean(groupId) && !mine && startOfRun;
+                return (
+                  <li key={message.Message_ID} className={cn("flex items-end gap-2", mine && "flex-row-reverse", startOfRun && index > 0 && "mt-2")}>
+                    {!mine && (
+                      <span className="w-7 shrink-0">
+                        {endOfRun ? (
+                          <button type="button" aria-label={`Open ${author}`} onClick={() => setProfileId(message.Author_ID)}>
+                            <Avatar name={author} size={28} src={personAvatarSrc(authorUser)} />
+                          </button>
+                        ) : null}
+                      </span>
+                    )}
+                    <div className={cn("flex min-w-0 max-w-[min(28rem,78vw)] flex-col", mine ? "items-end" : "items-start")}>
+                      {showName && (
+                        <button type="button" className="mb-0.5 px-1 text-[11px] font-medium leading-4 text-muted" onClick={() => setProfileId(message.Author_ID)}>
+                          {author}
+                        </button>
+                      )}
+                      <MessageBody message={message} mine={mine} users={data.users} onMention={setProfileId} />
+                      {endOfRun && (
+                        <span className="mt-0.5 px-1 text-[10px] leading-4 text-muted">{formatTime(message.Created_At)}</span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+              <li ref={endRef} aria-hidden className="h-px w-full shrink-0" />
+            </ul>
+          </div>
+          <div
+            className={cn("shrink-0 border-t border-line bg-white", !keyboardOpen && "pb-[env(safe-area-inset-bottom)]")}
+            onFocusCapture={() => {
+              window.requestAnimationFrame(scrollToLatest);
+            }}
+          >
+            <Composer
+              key={personId || groupId || "none"}
+              placeholder={person ? "Message…" : group ? `Message ${group.Name}` : "Choose a conversation"}
+              disabled={!conversationOpen}
+              mentions={group ? data.users.filter((user) => user.User_ID !== me && user.Status === "Active" && data.members.some((member) => member.Team_ID === group.Team_ID && member.User_ID === user.User_ID && member.Status === "Active")) : []}
+              onSend={send}
+            />
+          </div>
         </div>
       </section>
       {profile && (
