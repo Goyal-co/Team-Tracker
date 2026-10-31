@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Paperclip, Smile } from "lucide-react";
+import { Paperclip, SendHorizontal, Smile } from "lucide-react";
 import { commentParts } from "../domain/format";
 import type { User, WorkspaceMessage } from "../domain/types";
-import { fileMime, fileToBase64 } from "../lib";
-import { Button, TextInput } from "./ui";
+import { cn, fileMime, fileToBase64 } from "../lib";
+import { TextInput } from "./ui";
 
 const EMOJI = ["😀", "😁", "😂", "😊", "😍", "🙏", "👍", "👏", "🎉", "✅", "🔥", "❤️", "💡", "📌", "📅", "👋", "😅", "🤔", "👀", "🚀"];
 
@@ -132,17 +132,19 @@ export function Composer({
     }
   }
 
+  const canSend = !disabled && !busy && Boolean(draft.trim() || file);
+
   return (
-    <form className="border-t border-line bg-white p-3" onSubmit={(event) => void submit(event)}>
+    <form className="bg-white px-2 py-2 sm:px-3" onSubmit={(event) => void submit(event)}>
       {file && (
         <div className="mb-2 flex items-center justify-between rounded-md bg-canvas px-2 py-1 text-[12px]">
           <span className="truncate">{file.name}</span>
           <button type="button" className="text-muted" onClick={() => setFile(null)}>Remove</button>
         </div>
       )}
-      <div ref={popRef} className="relative flex items-center gap-1">
+      <div ref={popRef} className="relative flex items-end gap-1.5">
         {suggestions.length > 0 && (
-          <ul className="absolute bottom-full left-16 z-20 mb-2 w-64 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
+          <ul className="absolute bottom-full left-12 z-20 mb-2 w-64 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
             {suggestions.map((user, index) => (
               <li key={user.User_ID}>
                 <button
@@ -156,9 +158,9 @@ export function Composer({
             ))}
           </ul>
         )}
-        <div className="relative">
-          <button type="button" aria-label="Emoji" className="rounded-md p-2 text-muted hover:bg-canvas" disabled={disabled} onClick={() => setEmoji((open) => !open)}>
-            <Smile size={18} />
+        <div className="relative shrink-0">
+          <button type="button" aria-label="Emoji" className="inline-flex h-10 w-10 items-center justify-center rounded-full text-muted hover:bg-canvas" disabled={disabled} onClick={() => setEmoji((open) => !open)}>
+            <Smile size={20} />
           </button>
           {emoji && (
             <div className="absolute bottom-11 left-0 z-20 grid w-56 grid-cols-5 gap-1 rounded-lg border border-line bg-white p-2 shadow-lg">
@@ -170,8 +172,8 @@ export function Composer({
             </div>
           )}
         </div>
-        <button type="button" aria-label="Attach a file" className="rounded-md p-2 text-muted hover:bg-canvas" disabled={disabled} onClick={() => picker.current?.click()}>
-          <Paperclip size={18} />
+        <button type="button" aria-label="Attach a file" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted hover:bg-canvas" disabled={disabled} onClick={() => picker.current?.click()}>
+          <Paperclip size={20} />
         </button>
         <input
           ref={picker}
@@ -187,12 +189,22 @@ export function Composer({
           value={draft}
           placeholder={placeholder}
           disabled={disabled}
-          className="w-full"
+          className="min-h-10 flex-1 rounded-full border-line bg-canvas px-4"
           onChange={(event) => { setDraft(event.target.value); rememberCaret(event.target); setActive(0); setHideMentions(false); }}
           onSelect={(event) => rememberCaret(event.currentTarget)}
           onKeyDown={onKeyDown}
         />
-        <Button type="submit" disabled={disabled || busy || (!draft.trim() && !file)}>Send</Button>
+        <button
+          type="submit"
+          aria-label="Send message"
+          disabled={!canSend}
+          className={cn(
+            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition",
+            canSend ? "bg-accent text-white hover:bg-[#0055cc]" : "bg-slate-200 text-slate-400",
+          )}
+        >
+          <SendHorizontal size={18} strokeWidth={2.25} className={canSend ? "translate-x-px" : undefined} />
+        </button>
       </div>
     </form>
   );
