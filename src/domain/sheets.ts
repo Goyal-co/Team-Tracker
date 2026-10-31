@@ -36,8 +36,8 @@ function sheet(headers: string[], rows: readonly object[]): string[][] {
 }
 
 const HEADERS = {
-  USERS: ["User_ID", "Name", "Email", "Department", "Role", "Reports_To", "Status", "Access_Role"],
-  TEAMS: ["Team_ID", "Name", "Description", "Status", "Created_At"],
+  USERS: ["User_ID", "Name", "Email", "Department", "Role", "Reports_To", "Status", "Access_Role", "Avatar_Ref", "Avatar_Mime"],
+  TEAMS: ["Team_ID", "Name", "Description", "Status", "Created_At", "Avatar_Ref", "Avatar_Mime"],
   TEAM_MEMBERS: ["Team_ID", "User_ID", "Member_Role", "Status", "Joined_At"],
   PROJECTS: ["Project_ID", "Team_ID", "Name", "Key", "Next_Number", "Status"],
   INVITES: ["Invite_ID", "Email", "Team_ID", "Access_Role", "Member_Role", "Invited_By", "Status", "Created_At", "Responded_At"],

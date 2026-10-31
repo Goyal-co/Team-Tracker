@@ -4,7 +4,7 @@ import { Bell, CalendarDays, CircleHelp, Download, History, LayoutDashboard, Lis
 import { formatLongDate } from "../domain/dates";
 import { chatUnreadNotes, tasksNeedingMyReview } from "../domain/inbox";
 import { canCreateTasks } from "../domain/permissions";
-import { cn } from "../lib";
+import { cn, personAvatarSrc } from "../lib";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
 import { MeetingDrawer } from "./meeting-drawer";
@@ -46,7 +46,23 @@ export function Shell() {
   const unread = data.notifications.filter((item) => !item.Read_At).length;
   const chatUnread = chatUnreadNotes(data.notifications).length;
   const reviewCount = useMemo(() => tasksNeedingMyReview(data).length, [data]);
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const chatFromUrl = useMemo(() => {
+    if (!location.pathname.startsWith("/chat")) return false;
+    const params = new URLSearchParams(location.search);
+    return Boolean(params.get("with") || params.get("group"));
+  }, [location.pathname, location.search]);
+  const chatConversationOpen = mobileChatOpen || chatFromUrl;
   const myInvites = data.invites.filter((invite) => invite.Status === "Pending" && invite.Email.toLowerCase() === data.me.Email.toLowerCase());
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/chat")) setMobileChatOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle("chat-immersive", chatConversationOpen);
+    return () => document.body.classList.remove("chat-immersive");
+  }, [chatConversationOpen]);
 
   useEffect(() => {
     setStandalone(window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true);
@@ -163,8 +179,8 @@ export function Shell() {
   const navItem = cn("flex w-full items-center rounded-lg", showLabels ? "flex-row flex-nowrap gap-3 px-3 py-2 text-left text-[13px]" : "flex-col gap-1 px-1.5 py-2 text-center text-[11px] leading-3");
 
   return (
-    <div className="flex h-full min-h-screen bg-canvas">
-      <aside className={cn("fixed inset-y-0 left-0 z-30 flex flex-col border-r border-line bg-white transition-[width] duration-200 md:static", showLabels ? "w-64" : "w-[72px]", mobile ? "translate-x-0" : "-translate-x-full md:translate-x-0")}>
+    <div className={cn("flex bg-canvas", chatConversationOpen ? "h-[100dvh] max-h-[100dvh] overflow-hidden" : "h-full min-h-screen")}>
+      <aside className={cn("fixed inset-y-0 left-0 z-30 flex flex-col border-r border-line bg-white transition-[width] duration-200 md:static", showLabels ? "w-64" : "w-[72px]", mobile ? "translate-x-0" : "-translate-x-full md:translate-x-0", chatConversationOpen && "hidden md:flex")}>
         <div className={cn("flex h-14 shrink-0 flex-row flex-nowrap items-center", showLabels ? "gap-2 px-3" : "justify-center")}>
           {showLabels ? (
             <>
@@ -213,7 +229,7 @@ export function Shell() {
             </button>
           )}
           <button type="button" title={data.me.Name} aria-label="Your profile" className={cn(navItem, "text-ink hover:bg-slate-50")} onClick={() => navigate(`/team/${data.me.User_ID}`)}>
-            <Avatar name={data.me.Name} size={28} />
+            <Avatar name={data.me.Name} size={28} src={personAvatarSrc(data.me)} />
             {showLabels && <span className="truncate">{data.me.Name}</span>}
           </button>
           <button type="button" title="Sign out" aria-label="Sign out" onClick={() => void signOut()} className={cn(navItem, "text-muted hover:bg-slate-50 hover:text-ink")}>
@@ -222,8 +238,8 @@ export function Shell() {
         </div>
       </aside>
       {mobile && <button className="fixed inset-0 z-20 bg-slate-900/30 md:hidden" aria-label="Close menu" onClick={() => setMobile(false)} />}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-end gap-3 border-b border-line bg-white px-3 md:gap-4 md:px-5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className={cn("flex h-14 items-center justify-end gap-3 border-b border-line bg-white px-3 md:gap-4 md:px-5", chatConversationOpen && "hidden md:flex")}>
           <button type="button" className="mr-auto rounded-lg p-2 text-muted hover:bg-slate-50 md:hidden" aria-label="Open menu" onClick={() => setMobile(true)}><Menu size={18} /></button>
           <button type="button" className="rounded-lg p-2 text-muted hover:bg-slate-50 md:hidden" aria-label="Search" onClick={() => setSearchOpen(true)}><Search size={18} /></button>
           <button type="button" className="hidden h-9 w-80 shrink-0 items-center gap-2 rounded-[10px] border border-line bg-canvas px-3 text-left text-[13px] text-muted md:flex" onClick={() => setSearchOpen(true)}>
@@ -277,7 +293,7 @@ export function Shell() {
               </div>
             )}
           </div>
-          <button type="button" aria-label="Your profile" className="ml-1" onClick={() => navigate(`/team/${data.me.User_ID}`)}><Avatar name={data.me.Name} size={32} /></button>
+          <button type="button" aria-label="Your profile" className="ml-1" onClick={() => navigate(`/team/${data.me.User_ID}`)}><Avatar name={data.me.Name} size={32} src={personAvatarSrc(data.me)} /></button>
         </header>
         {myInvites.length > 0 && (
           <div className="border-b border-line bg-accent-soft px-3 py-2 md:px-5">
@@ -320,11 +336,19 @@ export function Shell() {
             <Button type="button" variant="ghost" className="h-7 px-2" onClick={() => setPushPrompt("hidden")}>Dismiss</Button>
           </div>
         )}
-        <main id="content" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", location.pathname === "/chat" ? "overflow-hidden pb-16 md:pb-0" : "overflow-auto px-3 py-4 pb-24 md:px-4 md:pb-4")}>
-          <Outlet context={{ openTask: setTaskId, openCreateTask: (teamId?: string) => setCreateTask(typeof teamId === "string" ? teamId : ""), openCreateMeeting: (date?: string, attendeeIds?: string[]) => setCreateMeeting({ date, attendeeIds }), openMeeting: setMeetingId }} />
+        <main id="content" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", location.pathname.startsWith("/chat") ? (chatConversationOpen ? "overflow-hidden pb-0" : "overflow-hidden pb-16 md:pb-0") : "overflow-auto px-3 py-4 pb-24 md:px-4 md:pb-4")}>
+          <Outlet context={{ openTask: setTaskId, openCreateTask: (teamId?: string) => setCreateTask(typeof teamId === "string" ? teamId : ""), openCreateMeeting: (date?: string, attendeeIds?: string[]) => setCreateMeeting({ date, attendeeIds }), openMeeting: setMeetingId, setMobileChatOpen }} />
         </main>
       </div>
-      <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-line bg-white pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Mobile">
+      <nav
+        data-mobile-nav
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-20 flex border-t border-line bg-white pb-[env(safe-area-inset-bottom)] md:hidden",
+          chatConversationOpen && "pointer-events-none invisible hidden",
+        )}
+        aria-label="Mobile"
+        aria-hidden={chatConversationOpen}
+      >
         {NAV.filter((item) => item.to !== "/activity").map((item) => {
           const badge = item.to === "/chat" ? chatUnread : (item.to === "/" || item.to === "/my-tasks") ? reviewCount : 0;
           const badgeTone = item.to === "/chat" ? "bg-red-600 text-white" : "bg-accent text-white";
@@ -398,6 +422,7 @@ export interface ShellApi {
   openCreateTask: (teamId?: string) => void;
   openCreateMeeting: (date?: string, attendeeIds?: string[]) => void;
   openMeeting: (id: string) => void;
+  setMobileChatOpen: (open: boolean) => void;
 }
 
 export function useShell() {

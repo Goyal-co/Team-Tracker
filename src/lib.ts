@@ -2,6 +2,16 @@ export function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+export function personAvatarSrc(user?: { User_ID: string; Avatar_Ref?: string } | null) {
+  if (!user?.Avatar_Ref) return undefined;
+  return `/api/users/${user.User_ID}/avatar?v=${encodeURIComponent(user.Avatar_Ref.slice(-12))}`;
+}
+
+export function teamAvatarSrc(team?: { Team_ID: string; Avatar_Ref?: string } | null) {
+  if (!team?.Avatar_Ref) return undefined;
+  return `/api/teams/${team.Team_ID}/avatar?v=${encodeURIComponent(team.Avatar_Ref.slice(-12))}`;
+}
+
 const FILE_TYPES: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",

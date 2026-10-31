@@ -35,6 +35,8 @@ import {
   revokeInvite,
   saveUser,
   setPushDispatch,
+  setSelfAvatar,
+  setTeamAvatar,
   slotsFor,
   syncMeeting,
   transitionTask,
@@ -668,6 +670,44 @@ export function createApp(deps: AppDeps) {
     }),
   );
   app.post(
+    "/api/me/avatar",
+    authed(async (req, res) => {
+      const input = attachmentSchema.parse(req.body);
+      if (!input.Mime_Type.startsWith("image/")) throw new HttpError(400, "Choose a PNG, JPEG, WebP, or GIF image.");
+      const file = await storedFile(input, "avatars");
+      if (!file) throw new HttpError(400, "Choose a photo.");
+      try {
+        const outcome = await mutate((db) => ({ db, result: setSelfAvatar(db, req.user, { Mime_Type: file.Mime_Type, Storage_Ref: file.Storage_Ref }) }));
+        if (outcome.previousRef) await deleteStored(outcome.previousRef, uploadDir).catch(() => undefined);
+        res.json({ user: outcome.user });
+      } catch (error) {
+        await deleteStored(file.Storage_Ref, uploadDir).catch(() => undefined);
+        throw error;
+      }
+    }),
+  );
+  app.delete(
+    "/api/me/avatar",
+    authed(async (req, res) => {
+      const outcome = await mutate((db) => ({ db, result: setSelfAvatar(db, req.user, null) }));
+      if (outcome.previousRef) await deleteStored(outcome.previousRef, uploadDir).catch(() => undefined);
+      res.json({ user: outcome.user });
+    }),
+  );
+  app.get(
+    "/api/users/:id/avatar",
+    authed(async (req, res) => {
+      const file = await readDb((db) => {
+        const user = db.users.find((item) => item.User_ID === req.params.id);
+        if (!user?.Avatar_Ref) throw new HttpError(404, "No photo yet.");
+        return { name: `${user.Name}-avatar`, mime: user.Avatar_Mime || "image/jpeg", ref: user.Avatar_Ref };
+      });
+      const bytes = await readStored(file.ref, uploadDir);
+      if (!bytes) throw new HttpError(404, "The photo is no longer available.");
+      sendDownload(res, file.name, file.mime, bytes);
+    }),
+  );
+  app.post(
     "/api/teams",
     authed(async (req, res) => {
       const input = teamSchema.parse(req.body);
@@ -681,6 +721,44 @@ export function createApp(deps: AppDeps) {
       const input = teamSchema.pick({ Name: true }).parse(req.body);
       const team = await mutate((db) => ({ db, result: renameTeam(db, req.user, req.params.id, input.Name) }));
       res.json({ team });
+    }),
+  );
+  app.post(
+    "/api/teams/:id/avatar",
+    authed(async (req, res) => {
+      const input = attachmentSchema.parse(req.body);
+      if (!input.Mime_Type.startsWith("image/")) throw new HttpError(400, "Choose a PNG, JPEG, WebP, or GIF image.");
+      const file = await storedFile(input, "avatars");
+      if (!file) throw new HttpError(400, "Choose a photo.");
+      try {
+        const outcome = await mutate((db) => ({ db, result: setTeamAvatar(db, req.user, req.params.id, { Mime_Type: file.Mime_Type, Storage_Ref: file.Storage_Ref }) }));
+        if (outcome.previousRef) await deleteStored(outcome.previousRef, uploadDir).catch(() => undefined);
+        res.json({ team: outcome.team });
+      } catch (error) {
+        await deleteStored(file.Storage_Ref, uploadDir).catch(() => undefined);
+        throw error;
+      }
+    }),
+  );
+  app.delete(
+    "/api/teams/:id/avatar",
+    authed(async (req, res) => {
+      const outcome = await mutate((db) => ({ db, result: setTeamAvatar(db, req.user, req.params.id, null) }));
+      if (outcome.previousRef) await deleteStored(outcome.previousRef, uploadDir).catch(() => undefined);
+      res.json({ team: outcome.team });
+    }),
+  );
+  app.get(
+    "/api/teams/:id/avatar",
+    authed(async (req, res) => {
+      const file = await readDb((db) => {
+        const team = db.teams.find((item) => item.Team_ID === req.params.id);
+        if (!team?.Avatar_Ref) throw new HttpError(404, "No photo yet.");
+        return { name: `${team.Name}-avatar`, mime: team.Avatar_Mime || "image/jpeg", ref: team.Avatar_Ref };
+      });
+      const bytes = await readStored(file.ref, uploadDir);
+      if (!bytes) throw new HttpError(404, "The photo is no longer available.");
+      sendDownload(res, file.name, file.mime, bytes);
     }),
   );
   app.delete(

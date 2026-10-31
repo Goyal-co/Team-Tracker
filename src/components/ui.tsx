@@ -35,7 +35,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
   );
 }
 
-export const inputClass = "h-9 rounded-[10px] border border-line bg-white px-3 text-[13px] text-ink outline-none placeholder:text-slate-400";
+export const inputClass = "h-9 rounded-[10px] border border-line bg-white px-3 text-base text-ink outline-none placeholder:text-slate-400 md:text-[13px]";
 
 function sized(className: string | undefined, extra?: string) {
   const setsWidth = Boolean(className && /(?:^|\s)(?:w-|max-w-|min-w-)/.test(className));
@@ -47,7 +47,7 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 
 export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={cn("min-h-24 w-full rounded-[10px] border border-line bg-white px-3 py-2 text-[13px] text-ink outline-none", props.className)} />;
+  return <textarea {...props} className={cn("min-h-24 w-full rounded-[10px] border border-line bg-white px-3 py-2 text-base text-ink outline-none md:text-[13px]", props.className)} />;
 }
 
 export function SelectInput(props: SelectHTMLAttributes<HTMLSelectElement>) {
@@ -147,7 +147,18 @@ export function OutsideClose({ active, onClose, className, children }: { active:
 
 const COLORS = ["#1d4ed8", "#0f766e", "#b45309", "#6d28d9", "#be123c", "#334155"];
 
-export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
+export function Avatar({ name, size = 28, src }: { name: string; size?: number; src?: string }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        title={name}
+        className="shrink-0 rounded-full object-cover"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   const initials = name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
   let hash = 0;
   for (const char of name) hash = (hash + char.charCodeAt(0)) % COLORS.length;

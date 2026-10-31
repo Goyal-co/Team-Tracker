@@ -32,6 +32,19 @@ textarea {
   font: inherit;
 }
 
+/* iOS Safari zooms focused inputs under 16px; keep chat typing stable on phones. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  body.chat-immersive [data-mobile-nav] {
+    display: none !important;
+  }
+}
+
 :focus-visible {
   outline: 2px solid #0c66e4;
   outline-offset: 2px;

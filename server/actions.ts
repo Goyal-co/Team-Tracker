@@ -897,6 +897,8 @@ export function saveUser(
     Reports_To: joinIds(input.Reports_To),
     Status: input.Status,
     Access_Role: input.Access_Role,
+    Avatar_Ref: "",
+    Avatar_Mime: "",
   };
   db.users.push(user);
   assertNoCycle(db, user.User_ID, input.Reports_To);
@@ -1011,11 +1013,37 @@ export function createTeam(db: BusinessDb, actor: User, input: { Name: string; D
   if (db.teams.some((team) => team.Status === "Active" && team.Name.toLowerCase() === name.toLowerCase())) {
     throw new HttpError(400, "A group already uses that name.");
   }
-  const team = { Team_ID: nextId("TM-", db.teams.map((item) => item.Team_ID), 3), Name: name, Description: input.Description, Status: "Active" as const, Created_At: nowIso() };
+  const team = { Team_ID: nextId("TM-", db.teams.map((item) => item.Team_ID), 3), Name: name, Description: input.Description, Status: "Active" as const, Created_At: nowIso(), Avatar_Ref: "", Avatar_Mime: "" };
   db.teams.unshift(team);
   db.members.push({ Team_ID: team.Team_ID, User_ID: actor.User_ID, Member_Role: "Lead", Status: "Active", Joined_At: nowIso() });
   log(db, actor.User_ID, "team.created", "team", team.Team_ID, "", team.Name);
   return team;
+}
+
+const IMAGE_AVATAR = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+export function setSelfAvatar(db: BusinessDb, actor: User, file: { Mime_Type: string; Storage_Ref: string } | null) {
+  const user = userById(db, actor.User_ID);
+  if (user.Status !== "Active") throw new HttpError(403, "This account is inactive.");
+  if (file && !IMAGE_AVATAR.has(file.Mime_Type)) throw new HttpError(400, "Choose a PNG, JPEG, WebP, or GIF image.");
+  const previous = user.Avatar_Ref;
+  user.Avatar_Ref = file?.Storage_Ref || "";
+  user.Avatar_Mime = file?.Mime_Type || "";
+  log(db, actor.User_ID, "user.updated", "user", user.User_ID, "", file ? "avatar" : "avatar-cleared");
+  return { user, previousRef: previous };
+}
+
+export function setTeamAvatar(db: BusinessDb, actor: User, teamId: string, file: { Mime_Type: string; Storage_Ref: string } | null) {
+  const team = db.teams.find((item) => item.Team_ID === teamId && item.Status === "Active");
+  if (!team) throw new HttpError(404, "That group was not found.");
+  const lead = db.members.some((member) => member.Team_ID === teamId && member.User_ID === actor.User_ID && member.Status === "Active" && member.Member_Role === "Lead");
+  if (actor.Access_Role !== "Admin" && !lead) throw new HttpError(403, "Only a group lead or administrator can change the group photo.");
+  if (file && !IMAGE_AVATAR.has(file.Mime_Type)) throw new HttpError(400, "Choose a PNG, JPEG, WebP, or GIF image.");
+  const previous = team.Avatar_Ref;
+  team.Avatar_Ref = file?.Storage_Ref || "";
+  team.Avatar_Mime = file?.Mime_Type || "";
+  log(db, actor.User_ID, "team.updated", "team", team.Team_ID, "", file ? "avatar" : "avatar-cleared");
+  return { team, previousRef: previous };
 }
 
 export function renameTeam(db: BusinessDb, actor: User, teamId: string, nameInput: string) {
@@ -1039,6 +1067,7 @@ export function deleteTeam(db: BusinessDb, actor: User, teamId: string) {
   if (!team) throw new HttpError(404, "That group was not found.");
   const taskIds = new Set(db.tasks.filter((task) => task.Team_ID === teamId).map((task) => task.Task_ID));
   const storageRefs: string[] = [];
+  if (team.Avatar_Ref) storageRefs.push(team.Avatar_Ref);
   for (const file of db.attachments) {
     if (taskIds.has(file.Task_ID) && file.Storage_Ref) storageRefs.push(file.Storage_Ref);
   }
@@ -1176,6 +1205,8 @@ export function ensureAccount(db: BusinessDb, profile: { email: string; name: st
       Reports_To: "",
       Status: "Active",
       Access_Role: becomesAdmin ? "Admin" : "Employee",
+      Avatar_Ref: "",
+      Avatar_Mime: "",
     };
     db.users.push(user);
     log(db, user.User_ID, "user.created", "user", user.User_ID, "", user.Name);

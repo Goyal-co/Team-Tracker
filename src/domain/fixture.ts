@@ -13,8 +13,8 @@ export function companyFixture(now = new Date("2026-10-21T06:30:00.000Z")): Busi
   ];
   db.users = users;
   db.teams = [
-    { Team_ID: "TM-001", Name: "Technology", Description: "Product engineering", Status: "Active", Created_At: stamp },
-    { Team_ID: "TM-002", Name: "Marketing", Description: "Campaigns", Status: "Active", Created_At: stamp },
+    { Team_ID: "TM-001", Name: "Technology", Description: "Product engineering", Status: "Active", Created_At: stamp, Avatar_Ref: "", Avatar_Mime: "" },
+    { Team_ID: "TM-002", Name: "Marketing", Description: "Campaigns", Status: "Active", Created_At: stamp, Avatar_Ref: "", Avatar_Mime: "" },
   ];
   db.members = [
     member("TM-001", "U-002", "Lead", stamp),
@@ -38,7 +38,7 @@ export function companyFixture(now = new Date("2026-10-21T06:30:00.000Z")): Busi
 }
 
 function user(id: string, name: string, email: string, access: User["Access_Role"], reports: string): User {
-  return { User_ID: id, Name: name, Email: email, Department: "", Role: access === "Employee" ? "Engineer" : "Lead", Reports_To: reports, Status: "Active", Access_Role: access };
+  return { User_ID: id, Name: name, Email: email, Department: "", Role: access === "Employee" ? "Engineer" : "Lead", Reports_To: reports, Status: "Active", Access_Role: access, Avatar_Ref: "", Avatar_Mime: "" };
 }
 
 function member(teamId: string, userId: string, role: "Lead" | "Member", stamp: string) {

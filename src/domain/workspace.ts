@@ -55,8 +55,16 @@ function normalize(raw: Partial<BusinessDb>): BusinessDb {
   }
   return {
     version: 2,
-    users: asArray(raw.users),
-    teams: asArray(raw.teams),
+    users: asArray(raw.users).map((user) => ({
+      ...user,
+      Avatar_Ref: user.Avatar_Ref || "",
+      Avatar_Mime: user.Avatar_Mime || "",
+    })),
+    teams: asArray(raw.teams).map((team) => ({
+      ...team,
+      Avatar_Ref: team.Avatar_Ref || "",
+      Avatar_Mime: team.Avatar_Mime || "",
+    })),
     members: asArray(raw.members),
     projects: asArray(raw.projects).map((project) => ({ ...project, Next_Number: Number(project.Next_Number || 1) })),
     invites: asArray(raw.invites),

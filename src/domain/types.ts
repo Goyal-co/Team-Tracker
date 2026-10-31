@@ -44,6 +44,8 @@ export interface User {
   Reports_To: string;
   Status: "Active" | "Inactive";
   Access_Role: AccessRole;
+  Avatar_Ref: string;
+  Avatar_Mime: string;
 }
 
 export interface Team {
@@ -52,6 +54,8 @@ export interface Team {
   Description: string;
   Status: "Active" | "Archived";
   Created_At: string;
+  Avatar_Ref: string;
+  Avatar_Mime: string;
 }
 
 export interface TeamMember {

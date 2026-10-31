@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ChevronLeft } from "lucide-react";
 import { formatDateTime, formatDay, formatTime, kolkataDayFromIso, kolkataToday } from "../domain/dates";
 import { splitIds } from "../domain/ids";
 import { unreadForPerson, unreadForTeam } from "../domain/inbox";
 import type { Meeting, User, WorkspaceMessage } from "../domain/types";
+import { personAvatarSrc, teamAvatarSrc } from "../lib";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
 import { useShell } from "../components/shell";
@@ -55,6 +57,13 @@ export function ChatPage() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [thread.length, personId, groupId]);
 
+  useEffect(() => {
+    shell.setMobileChatOpen(Boolean(personId || groupId));
+    return () => shell.setMobileChatOpen(false);
+    // setMobileChatOpen is a stable React state setter from the shell
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personId, groupId]);
+
   const openUnreadIds = useMemo(() => {
     const unread = personId
       ? unreadForPerson(data.notifications, personId)
@@ -81,11 +90,13 @@ export function ChatPage() {
 
   function openGroup(id: string) {
     setProfileId(null);
+    shell.setMobileChatOpen(true);
     setParams({ group: id });
   }
 
   function openPerson(id: string) {
     setProfileId(null);
+    shell.setMobileChatOpen(true);
     setParams({ with: id });
   }
 
@@ -128,7 +139,7 @@ export function ChatPage() {
               return (
                 <li key={team.Team_ID}>
                   <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${groupId === team.Team_ID ? "bg-accent-soft" : ""}`} onClick={() => openGroup(team.Team_ID)}>
-                    <Avatar name={team.Name} size={32} />
+                    <Avatar name={team.Name} size={32} src={teamAvatarSrc(team)} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium">{team.Name}</span>
                       <span className="block truncate text-[12px] text-muted">{memberOf.has(team.Team_ID) ? "You're in this group" : "Group chat"}</span>
@@ -147,7 +158,7 @@ export function ChatPage() {
               return (
                 <li key={user.User_ID}>
                   <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${personId === user.User_ID ? "bg-accent-soft" : ""}`} onClick={() => openPerson(user.User_ID)}>
-                    <Avatar name={user.Name} size={32} />
+                    <Avatar name={user.Name} size={32} src={personAvatarSrc(user)} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium">{user.Name}</span>
                       <span className="block truncate text-[12px] text-muted">{preview(messages, me, user.User_ID) || user.Role || "Direct chat"}</span>
@@ -160,35 +171,54 @@ export function ChatPage() {
           </ul>
         </div>
       </aside>
-      <section className={`min-h-0 min-w-0 flex-1 flex-col bg-canvas ${personId || groupId ? (profile ? "hidden md:flex" : "flex") : "hidden md:flex"}`}>
-        <header className="flex items-center gap-2 border-b border-line bg-white px-4 py-3">
+      <section className={`min-h-0 min-w-0 flex-1 flex-col bg-canvas ${personId || groupId ? (profile ? "hidden md:flex" : "fixed inset-0 z-50 flex md:static md:z-auto") : "hidden md:flex"}`}>
+        <header className="flex shrink-0 items-center gap-2 border-b border-line bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-4">
           {(personId || groupId) && (
-            <button type="button" className="text-[13px] text-accent md:hidden" onClick={() => { setProfileId(null); setParams({}); }}>Back</button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-0.5 rounded-lg px-1.5 py-1 text-[13px] font-medium text-accent md:hidden"
+              onClick={() => { setProfileId(null); setParams({}); shell.setMobileChatOpen(false); }}
+            >
+              <ChevronLeft size={18} />
+              Back
+            </button>
           )}
           <div className="min-w-0 flex-1">
             {person ? (
-              <button type="button" className="text-left" onClick={() => setProfileId(person.User_ID)}>
-                <h1 className="text-[15px] font-semibold">{person.Name}</h1>
-                <p className="text-[12px] text-muted">Private chat · tap name for profile</p>
+              <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => setProfileId(person.User_ID)}>
+                <Avatar name={person.Name} size={36} src={personAvatarSrc(person)} />
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-semibold">{person.Name}</span>
+                  <span className="block text-[12px] text-muted">Private chat · tap for profile</span>
+                </span>
               </button>
+            ) : group ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <Avatar name={group.Name} size={36} src={teamAvatarSrc(group)} />
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-semibold">{group.Name}</span>
+                  <span className="block text-[12px] text-muted">Group chat · tap a name for profile</span>
+                </span>
+              </div>
             ) : (
               <>
-                <h1 className="text-[15px] font-semibold">{group?.Name || "Chat"}</h1>
-                <p className="text-[12px] text-muted">{group ? "Everyone in this group can see this. Select a name to open their profile." : "Choose a group, or search for a person."}</p>
+                <h1 className="text-[15px] font-semibold">Chat</h1>
+                <p className="text-[12px] text-muted">Choose a group, or search for a person.</p>
               </>
             )}
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto">
-        <ul className="flex min-h-full flex-col justify-end gap-3 px-4 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <ul className="flex flex-col justify-end gap-3 px-4 py-4">
           {!personId && !groupId && <li className="text-[13px] text-muted">Open a group, or search for someone you have not chatted with yet.</li>}
           {(personId || groupId) && thread.length === 0 && <li className="text-[13px] text-muted">No messages yet.</li>}
           {thread.map((message) => {
             const mine = message.Author_ID === me;
-            const author = names.get(message.Author_ID) ?? "Someone";
+            const authorUser = data.users.find((user) => user.User_ID === message.Author_ID);
+            const author = authorUser?.Name ?? names.get(message.Author_ID) ?? "Someone";
             return (
               <li key={message.Message_ID} className={`flex items-end gap-2 ${mine ? "flex-row-reverse" : ""}`}>
-                {!mine && <button type="button" aria-label={`Open ${author}`} onClick={() => setProfileId(message.Author_ID)}><Avatar name={author} size={28} /></button>}
+                {!mine && <button type="button" className="shrink-0" aria-label={`Open ${author}`} onClick={() => setProfileId(message.Author_ID)}><Avatar name={author} size={28} src={personAvatarSrc(authorUser)} /></button>}
                 <div className={`flex min-w-0 max-w-[min(28rem,80vw)] flex-col ${mine ? "items-end" : "items-start"}`}>
                   <button type="button" className="mb-0.5 text-[11px] leading-4 text-muted" onClick={() => setProfileId(message.Author_ID)}>{author} · {formatDateTime(message.Created_At)}</button>
                   <MessageBody message={message} mine={mine} users={data.users} onMention={setProfileId} />
@@ -199,13 +229,15 @@ export function ChatPage() {
           <li ref={endRef} />
         </ul>
         </div>
-        <Composer
-          key={personId || groupId || "none"}
-          placeholder={person ? `Message ${person.Name}` : group ? `Message ${group.Name}` : "Choose a conversation"}
-          disabled={!personId && !groupId}
-          mentions={group ? data.users.filter((user) => user.User_ID !== me && user.Status === "Active" && data.members.some((member) => member.Team_ID === group.Team_ID && member.User_ID === user.User_ID && member.Status === "Active")) : []}
-          onSend={send}
-        />
+        <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
+          <Composer
+            key={personId || groupId || "none"}
+            placeholder={person ? `Message ${person.Name}` : group ? `Message ${group.Name}` : "Choose a conversation"}
+            disabled={!personId && !groupId}
+            mentions={group ? data.users.filter((user) => user.User_ID !== me && user.Status === "Active" && data.members.some((member) => member.Team_ID === group.Team_ID && member.User_ID === user.User_ID && member.Status === "Active")) : []}
+            onSend={send}
+          />
+        </div>
       </section>
       {profile && (
         <PersonPanel
@@ -257,10 +289,10 @@ function PersonPanel({
     .slice(0, 6);
   const day = presence?.people[0];
   return (
-    <aside className="flex w-full min-w-0 shrink-0 flex-col border-line bg-white md:w-72 md:border-l">
-      <div className="flex items-center gap-3 border-b border-line px-3 py-3">
+    <aside className="fixed inset-0 z-50 flex w-full min-w-0 shrink-0 flex-col border-line bg-white md:static md:z-auto md:w-72 md:border-l">
+      <div className="flex items-center gap-3 border-b border-line px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <button type="button" className="text-[13px] text-accent md:hidden" onClick={onClose}>Back to chat</button>
-        <Avatar name={person.Name} size={40} />
+        <Avatar name={person.Name} size={40} src={personAvatarSrc(person)} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[15px] font-semibold">{person.Name}</h2>
           <p className="text-[12px] text-muted">{person.Role || person.Access_Role} · {person.Department || "No department"}</p>

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { isOverdue, kolkataToday } from "../domain/dates";
 import { canCreateTasks, managerIds } from "../domain/permissions";
 import { ACCESS_ROLES, MEMBER_ROLES, type Task, type TaskStatus } from "../domain/types";
 import { isPlaceholderEmail } from "../domain/ids";
+import { fileMime, fileToBase64, personAvatarSrc, teamAvatarSrc } from "../lib";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
 import { useShell } from "../components/shell";
@@ -13,10 +14,11 @@ import { TaskBoard } from "../components/task-board";
 import { Avatar, Button, Dialog, Drawer, EmptyState, Field, PageHeader, SelectInput, TextInput } from "../components/ui";
 
 export function TeamPage() {
-  const { data, createTeam, renameTeam, deleteTeam, createProject, addMember, invitePerson, revokeInvite, updateTask, transitionTask } = useWorkspace();
+  const { data, createTeam, renameTeam, deleteTeam, createProject, addMember, invitePerson, revokeInvite, updateTask, transitionTask, uploadTeamPhoto, clearTeamPhoto } = useWorkspace();
   const shell = useShell();
   const toast = useToast();
   const navigate = useNavigate();
+  const photoRef = useRef<HTMLInputElement>(null);
   const [teamId, setTeamId] = useState(data.teams.find((team) => team.Status === "Active")?.Team_ID ?? "");
   const [teamName, setTeamName] = useState("");
   const [renameValue, setRenameValue] = useState("");
@@ -51,6 +53,7 @@ export function TeamPage() {
   const teamTasks = data.tasks.filter((task) => task.Team_ID === teamId);
   const names = useMemo(() => new Map(data.users.map((user) => [user.User_ID, user.Name])), [data.users]);
   const canAddProject = admin || members.some((member) => member.User_ID === data.me.User_ID && member.Member_Role === "Lead");
+  const canEditPhoto = admin || members.some((member) => member.User_ID === data.me.User_ID && member.Member_Role === "Lead");
 
   async function move(task: Task, to: TaskStatus) {
     const reason = to === "Blocked" ? window.prompt("Why is this blocked?") ?? "" : "";
@@ -78,9 +81,12 @@ export function TeamPage() {
           {data.teams.filter((item) => item.Status === "Active").map((item) => {
             const count = data.members.filter((member) => member.Team_ID === item.Team_ID && member.Status === "Active").length;
             return (
-              <button key={item.Team_ID} type="button" className={`rounded-lg border px-3 py-2 text-left ${teamId === item.Team_ID ? "border-accent bg-accent-soft" : "border-line bg-white"}`} onClick={() => setTeamId(item.Team_ID)}>
-                <span className="block text-[14px] font-semibold">{item.Name}</span>
-                <span className="text-[12px] text-muted">{count} {count === 1 ? "person" : "people"}</span>
+              <button key={item.Team_ID} type="button" className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left ${teamId === item.Team_ID ? "border-accent bg-accent-soft" : "border-line bg-white"}`} onClick={() => setTeamId(item.Team_ID)}>
+                <Avatar name={item.Name} size={28} src={teamAvatarSrc(item)} />
+                <span>
+                  <span className="block text-[14px] font-semibold">{item.Name}</span>
+                  <span className="text-[12px] text-muted">{count} {count === 1 ? "person" : "people"}</span>
+                </span>
               </button>
             );
           })}
@@ -106,7 +112,34 @@ export function TeamPage() {
                   <Button type="button" variant="secondary" onClick={() => { setRenaming(false); setRenameValue(team.Name); }}>Cancel</Button>
                 </form>
               ) : (
-                <h2 className="text-[16px] font-semibold">{team.Name}</h2>
+                <div className="flex items-center gap-3">
+                  <Avatar name={team.Name} size={40} src={teamAvatarSrc(team)} />
+                  <div>
+                    <h2 className="text-[16px] font-semibold">{team.Name}</h2>
+                    {canEditPhoto && (
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <button type="button" className="text-[12px] text-accent" onClick={() => photoRef.current?.click()}>Change photo</button>
+                        {team.Avatar_Ref && (
+                          <button type="button" className="text-[12px] text-muted" onClick={() => void run(() => clearTeamPhoto(teamId), "Group photo removed.")}>Remove</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    ref={photoRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      void run(async () => {
+                        await uploadTeamPhoto(teamId, { File_Name: file.name, Mime_Type: fileMime(file), Content_Base64: await fileToBase64(file) });
+                      }, "Group photo updated.");
+                    }}
+                  />
+                </div>
               )}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -151,9 +184,12 @@ export function TeamPage() {
                         void run(() => updateTask(task.Task_ID, { Updated_At: task.Updated_At, Assigned_To: person.User_ID }), `Assigned to ${person.Name}. You will review it.`);
                       }}
                     >
-                      <button type="button" className="min-w-0 text-left" onClick={() => navigate(`/team/${person.User_ID}`)}>
-                        <span className="font-medium">{person.Name}</span>
-                        <span className="ml-2 text-muted">{member.Member_Role}</span>
+                      <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => navigate(`/team/${person.User_ID}`)}>
+                        <Avatar name={person.Name} size={28} src={personAvatarSrc(person)} />
+                        <span>
+                          <span className="font-medium">{person.Name}</span>
+                          <span className="ml-2 text-muted">{member.Member_Role}</span>
+                        </span>
                       </button>
                       <span className="flex shrink-0 gap-3">
                         {person.User_ID !== data.me.User_ID && <button type="button" className="text-accent" onClick={() => navigate(`/chat?with=${person.User_ID}`)}>Chat</button>}
@@ -309,9 +345,10 @@ function UserEditor({ id, onClose }: { id?: string; onClose: () => void }) {
 export function EmployeeProfilePage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { data, saveProfileName } = useWorkspace();
+  const { data, saveProfileName, uploadProfilePhoto, clearProfilePhoto } = useWorkspace();
   const toast = useToast();
   const shell = useShell();
+  const photoRef = useRef<HTMLInputElement>(null);
   const user = data.users.find((item) => item.User_ID === id);
   const [profileName, setProfileName] = useState(user?.Name ?? "");
   useEffect(() => {
@@ -333,11 +370,38 @@ export function EmployeeProfilePage() {
     <div className="mx-auto max-w-4xl">
       <Link to="/team" className="text-[13px] text-accent">Back to groups</Link>
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Avatar name={user.Name} size={48} />
+        <Avatar name={user.Name} size={48} src={personAvatarSrc(user)} />
         <div className="min-w-0 flex-1">
           <h1 className="text-[22px] font-semibold tracking-tight">{user.Name}</h1>
           <p className="text-[13px] text-muted">{user.Role} · {user.Department} · {user.Status}</p>
           <p className="text-[12px] text-muted">{data.teams.filter((team) => data.members.some((member) => member.Team_ID === team.Team_ID && member.User_ID === user.User_ID && member.Status === "Active")).map((team) => team.Name).join(", ") || "Not in a group yet"}</p>
+          {ownProfile && (
+            <div className="mt-1 flex flex-wrap gap-2">
+              <button type="button" className="text-[12px] text-accent" onClick={() => photoRef.current?.click()}>Change photo</button>
+              {user.Avatar_Ref && (
+                <button type="button" className="text-[12px] text-muted" onClick={() => void clearProfilePhoto().then(() => toast("Profile photo removed.")).catch((error: Error) => toast(error.message, "error"))}>Remove</button>
+              )}
+              <input
+                ref={photoRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  void (async () => {
+                    try {
+                      await uploadProfilePhoto({ File_Name: file.name, Mime_Type: fileMime(file), Content_Base64: await fileToBase64(file) });
+                      toast("Profile photo updated.");
+                    } catch (error) {
+                      toast(error instanceof Error ? error.message : "Could not update the photo.", "error");
+                    }
+                  })();
+                }}
+              />
+            </div>
+          )}
         </div>
         {!ownProfile && <Button type="button" onClick={() => navigate(`/chat?with=${user.User_ID}`)}>Message</Button>}
       </div>

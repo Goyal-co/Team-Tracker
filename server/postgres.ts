@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS workspace.users (
   role text NOT NULL,
   reports_to text NOT NULL,
   status text NOT NULL,
-  access_role text NOT NULL
+  access_role text NOT NULL,
+  avatar_ref text NOT NULL DEFAULT '',
+  avatar_mime text NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS workspace.teams (
   position integer NOT NULL,
@@ -44,7 +46,9 @@ CREATE TABLE IF NOT EXISTS workspace.teams (
   name text NOT NULL,
   description text NOT NULL,
   status text NOT NULL,
-  created_at text NOT NULL
+  created_at text NOT NULL,
+  avatar_ref text NOT NULL DEFAULT '',
+  avatar_mime text NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS workspace.team_members (
   position integer NOT NULL,
@@ -259,6 +263,12 @@ const VERSION_KEY = "mops:db-version";
 
 export async function ensureWorkspaceSchema(pool: Pool) {
   await pool.query(SCHEMA);
+  await pool.query(`
+ALTER TABLE workspace.users ADD COLUMN IF NOT EXISTS avatar_ref text NOT NULL DEFAULT '';
+ALTER TABLE workspace.users ADD COLUMN IF NOT EXISTS avatar_mime text NOT NULL DEFAULT '';
+ALTER TABLE workspace.teams ADD COLUMN IF NOT EXISTS avatar_ref text NOT NULL DEFAULT '';
+ALTER TABLE workspace.teams ADD COLUMN IF NOT EXISTS avatar_mime text NOT NULL DEFAULT '';
+`);
 }
 
 export async function workspaceIsEmpty(pool: Pool) {
@@ -451,8 +461,8 @@ async function saveWorkspace(pool: Pool, db: BusinessDb) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await insert(client, "users", ["user_id", "name", "email", "department", "role", "reports_to", "status", "access_role"], db.users.map((row) => [row.User_ID, row.Name, row.Email, row.Department, row.Role, row.Reports_To, row.Status, row.Access_Role]));
-    await insert(client, "teams", ["team_id", "name", "description", "status", "created_at"], db.teams.map((row) => [row.Team_ID, row.Name, row.Description, row.Status, row.Created_At]));
+    await insert(client, "users", ["user_id", "name", "email", "department", "role", "reports_to", "status", "access_role", "avatar_ref", "avatar_mime"], db.users.map((row) => [row.User_ID, row.Name, row.Email, row.Department, row.Role, row.Reports_To, row.Status, row.Access_Role, row.Avatar_Ref || "", row.Avatar_Mime || ""]));
+    await insert(client, "teams", ["team_id", "name", "description", "status", "created_at", "avatar_ref", "avatar_mime"], db.teams.map((row) => [row.Team_ID, row.Name, row.Description, row.Status, row.Created_At, row.Avatar_Ref || "", row.Avatar_Mime || ""]));
     await insert(client, "team_members", ["team_id", "user_id", "member_role", "status", "joined_at"], db.members.map((row) => [row.Team_ID, row.User_ID, row.Member_Role, row.Status, row.Joined_At]));
     await insert(client, "projects", ["project_id", "team_id", "name", "key", "next_number", "status"], db.projects.map((row) => [row.Project_ID, row.Team_ID, row.Name, row.Key, row.Next_Number, row.Status]));
     await insert(client, "invites", ["invite_id", "email", "team_id", "access_role", "member_role", "invited_by", "status", "created_at", "responded_at"], db.invites.map((row) => [row.Invite_ID, row.Email, row.Team_ID, row.Access_Role, row.Member_Role, row.Invited_By, row.Status, row.Created_At, row.Responded_At]));
@@ -489,8 +499,8 @@ async function insert(client: PoolClient, table: string, columns: string[], rows
   }
 }
 
-interface UserRow { user_id: string; name: string; email: string; department: string; role: string; reports_to: string; status: User["Status"]; access_role: User["Access_Role"] }
-interface TeamRow { team_id: string; name: string; description: string; status: Team["Status"]; created_at: string }
+interface UserRow { user_id: string; name: string; email: string; department: string; role: string; reports_to: string; status: User["Status"]; access_role: User["Access_Role"]; avatar_ref?: string; avatar_mime?: string }
+interface TeamRow { team_id: string; name: string; description: string; status: Team["Status"]; created_at: string; avatar_ref?: string; avatar_mime?: string }
 interface MemberRow { team_id: string; user_id: string; member_role: TeamMember["Member_Role"]; status: TeamMember["Status"]; joined_at: string }
 interface ProjectRow { project_id: string; team_id: string; name: string; key: string; next_number: number; status: Project["Status"] }
 interface InviteRow { invite_id: string; email: string; team_id: string; access_role: Invite["Access_Role"]; member_role: Invite["Member_Role"]; invited_by: string; status: Invite["Status"]; created_at: string; responded_at: string }
@@ -507,8 +517,8 @@ interface ScopeRow { user_id: string; scope_type: UserScope["Scope_Type"]; scope
 interface BusyRow { user_id: string; start_at: string; end_at: string; private_label: string }
 interface MessageRow { message_id: string; team_id: string; recipient_id: string; author_id: string; body: string; file_name: string; mime_type: string; size_bytes: number; storage_ref: string; created_at: string }
 
-function userFrom(row: UserRow): User { return { User_ID: row.user_id, Name: row.name, Email: row.email, Department: row.department, Role: row.role, Reports_To: row.reports_to, Status: row.status, Access_Role: row.access_role }; }
-function teamFrom(row: TeamRow): Team { return { Team_ID: row.team_id, Name: row.name, Description: row.description, Status: row.status, Created_At: row.created_at }; }
+function userFrom(row: UserRow): User { return { User_ID: row.user_id, Name: row.name, Email: row.email, Department: row.department, Role: row.role, Reports_To: row.reports_to, Status: row.status, Access_Role: row.access_role, Avatar_Ref: row.avatar_ref || "", Avatar_Mime: row.avatar_mime || "" }; }
+function teamFrom(row: TeamRow): Team { return { Team_ID: row.team_id, Name: row.name, Description: row.description, Status: row.status, Created_At: row.created_at, Avatar_Ref: row.avatar_ref || "", Avatar_Mime: row.avatar_mime || "" }; }
 function memberFrom(row: MemberRow): TeamMember { return { Team_ID: row.team_id, User_ID: row.user_id, Member_Role: row.member_role, Status: row.status, Joined_At: row.joined_at }; }
 function projectFrom(row: ProjectRow): Project { return { Project_ID: row.project_id, Team_ID: row.team_id, Name: row.name, Key: row.key, Next_Number: Number(row.next_number), Status: row.status }; }
 function inviteFrom(row: InviteRow): Invite { return { Invite_ID: row.invite_id, Email: row.email, Team_ID: row.team_id, Access_Role: row.access_role, Member_Role: row.member_role, Invited_By: row.invited_by, Status: row.status, Created_At: row.created_at, Responded_At: row.responded_at }; }

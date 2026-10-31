@@ -28,8 +28,12 @@ interface WorkspaceValue {
   slots: (input: unknown) => Promise<{ slots: Array<{ start: string; end: string; confirmed: boolean }>; warning: string; confirmed: boolean }>;
   saveUser: (input: unknown, id?: string) => Promise<User>;
   saveProfileName: (name: string) => Promise<User>;
+  uploadProfilePhoto: (file: { File_Name: string; Mime_Type: string; Content_Base64: string }) => Promise<User>;
+  clearProfilePhoto: () => Promise<User>;
   createTeam: (input: { Name: string; Description: string }) => Promise<Team>;
   renameTeam: (teamId: string, name: string) => Promise<Team>;
+  uploadTeamPhoto: (teamId: string, file: { File_Name: string; Mime_Type: string; Content_Base64: string }) => Promise<Team>;
+  clearTeamPhoto: (teamId: string) => Promise<Team>;
   deleteTeam: (teamId: string) => Promise<void>;
   sendMessage: (teamId: string, body: string, file?: { File_Name: string; Mime_Type: string; Content_Base64: string }) => Promise<void>;
   sendDirectMessage: (recipientId: string, body: string, file?: { File_Name: string; Mime_Type: string; Content_Base64: string }) => Promise<void>;
@@ -155,8 +159,16 @@ export function WorkspaceGate({
           run(async () => (await api<{ user: User }>(id ? `/api/users/${id}` : "/api/users", { method: id ? "PATCH" : "POST", body: JSON.stringify(input) })).user),
         saveProfileName: (name) =>
           run(async () => (await api<{ user: User }>("/api/me", { method: "PATCH", body: JSON.stringify({ Name: name }) })).user),
+        uploadProfilePhoto: (file) =>
+          run(async () => (await api<{ user: User }>("/api/me/avatar", { method: "POST", body: JSON.stringify(file) })).user),
+        clearProfilePhoto: () =>
+          run(async () => (await api<{ user: User }>("/api/me/avatar", { method: "DELETE" })).user),
         createTeam: (input) => run(async () => (await api<{ team: Team }>("/api/teams", { method: "POST", body: JSON.stringify(input) })).team),
         renameTeam: (teamId, name) => run(async () => (await api<{ team: Team }>(`/api/teams/${teamId}`, { method: "PATCH", body: JSON.stringify({ Name: name }) })).team),
+        uploadTeamPhoto: (teamId, file) =>
+          run(async () => (await api<{ team: Team }>(`/api/teams/${teamId}/avatar`, { method: "POST", body: JSON.stringify(file) })).team),
+        clearTeamPhoto: (teamId) =>
+          run(async () => (await api<{ team: Team }>(`/api/teams/${teamId}/avatar`, { method: "DELETE" })).team),
         deleteTeam: (teamId) => run(() => api(`/api/teams/${teamId}`, { method: "DELETE" })),
         sendMessage: async (teamId, body, file) => {
           const sent = await api<{ message: WorkspaceMessage }>(`/api/teams/${teamId}/messages`, { method: "POST", body: JSON.stringify({ Body: body, ...file }) });

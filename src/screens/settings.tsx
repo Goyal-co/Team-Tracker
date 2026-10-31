@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { isPlaceholderEmail } from "../domain/ids";
+import { fileMime, fileToBase64, personAvatarSrc } from "../lib";
 import { useWorkspace } from "../state";
 import { useToast } from "../toast";
-import { Button, Field, PageHeader, TextInput } from "../components/ui";
+import { Avatar, Button, Field, PageHeader, TextInput } from "../components/ui";
 
 export function SettingsPage() {
-  const { data, saveSettings, disconnectCalendar, saveProfileName, enablePush, disablePush } = useWorkspace();
+  const { data, saveSettings, disconnectCalendar, saveProfileName, uploadProfilePhoto, clearProfilePhoto, enablePush, disablePush } = useWorkspace();
+  const photoRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const [params] = useSearchParams();
   const start = data.settings.find((item) => item.Key === "workday_start")?.Value ?? "09:30";
@@ -44,6 +46,16 @@ export function SettingsPage() {
     }
   }
 
+  async function onPhoto(file: File | null) {
+    if (!file) return;
+    try {
+      await uploadProfilePhoto({ File_Name: file.name, Mime_Type: fileMime(file), Content_Base64: await fileToBase64(file) });
+      toast("Profile photo updated.");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not update the photo.", "error");
+    }
+  }
+
   async function saveHours() {
     try {
       await saveSettings({ workday_start: workStart, workday_end: workEnd, workdays });
@@ -60,7 +72,26 @@ export function SettingsPage() {
       {(calendarNote === "missing" || calendarNote === "missing-refresh" || calendarNote === "failed") && <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[13px] text-amber-900">Google permissions were not accepted. Use the button below to allow them.</p>}
       <section className="mb-4 rounded-xl border border-line bg-white p-4">
         <h2 className="text-[14px] font-semibold">Profile</h2>
-        <p className="mt-1 text-[13px] text-muted">This name is shown on your profile, in the directory, and when someone tags you in a comment.</p>
+        <p className="mt-1 text-[13px] text-muted">This name and photo are shown on your profile, in chat, and when someone tags you.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Avatar name={data.me.Name} size={56} src={personAvatarSrc(data.me)} />
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={() => photoRef.current?.click()}>Change photo</Button>
+            {data.me.Avatar_Ref && (
+              <Button type="button" variant="ghost" onClick={() => void clearProfilePhoto().then(() => toast("Profile photo removed.")).catch((error: Error) => toast(error.message, "error"))}>Remove</Button>
+            )}
+            <input
+              ref={photoRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={(event) => {
+                void onPhoto(event.target.files?.[0] ?? null);
+                event.target.value = "";
+              }}
+            />
+          </div>
+        </div>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <div className="min-w-[220px] flex-1">
             <Field label="Profile name">
